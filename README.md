@@ -21,4 +21,7 @@ docker compose exec app python main.py
 docker compose down
 docker compose run --rm app python main.py
 
+docker compose run --rm app pipenv install requests
+docker compose run --rm app pipenv install --dev ruff
+
 ```
