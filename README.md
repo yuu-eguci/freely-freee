@@ -7,21 +7,20 @@ freely-freee
 
 ![](./docs/image-birds-at-tree.webp)
 
-Docker (Python 3.12)
----
-
-`docker compose` で Python 3.12 の実行環境を起動できます。  
-ルートディレクトリの `.env` は `docker-compose.yml` の `env_file` で読み込みます。
+## Commands
 
 ```bash
+# 最初のセットアップ
 docker compose up -d --build
-docker compose exec app python --version
-docker compose exec app python main.py
-# => Python 3.12.x
-docker compose down
-docker compose run --rm app python main.py
 
-docker compose run --rm app pipenv install requests
-docker compose run --rm app pipenv install --dev ruff
+# Ruff を動かしてみる
+docker compose run --rm app pipenv run ruff check .
+docker compose run --rm app pipenv run ruff check --fix .
 
+# Python スクリプトを動かしてみる
+# まあとりあえずコレを実行。 "AUTH_CODE 入れろやあ!" って言われると思うので、エラーメッセージの案内に従って AUTH_CODE を手に入れて……
+docker compose run --rm app pipenv run python main.py
+# そんでこれを実行する。一度 token.json が出来ちゃえば、次からは AUTH_CODE なしで実行で OK.
+# token.json は90日で expire する。
+docker compose run --rm app pipenv run python main.py --auth-code AUTH_CODE
 ```
