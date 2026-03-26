@@ -23,5 +23,23 @@ docker compose run --rm app python main.py
 
 docker compose run --rm app pipenv install requests
 docker compose run --rm app pipenv install --dev ruff
+```
 
+Ruff
+---
+
+lint と format のチェックは Docker 経由で実行します。設定は `pyproject.toml` に記載しています。
+
+```bash
+# lint チェック
+docker compose run --rm app pipenv run ruff check .
+
+# lint 自動修正
+docker compose run --rm app pipenv run ruff check --fix .
+
+# format チェック
+docker compose run --rm app pipenv run ruff format --check .
+
+# format 実行
+docker compose run --rm app pipenv run ruff format .
 ```
