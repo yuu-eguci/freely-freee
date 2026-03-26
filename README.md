@@ -11,7 +11,7 @@ Docker (Python 3.12)
 ---
 
 `docker compose` で Python 3.12 の実行環境を起動できます。  
-ルートディレクトリの `.env` は `docker-compose.yml` の `env_file` で読み込みます。
+ルートディレクトリの `.env` は `compose.yml` の `env_file` で読み込みます。
 
 ```bash
 docker compose up -d --build

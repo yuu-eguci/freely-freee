@@ -5,3 +5,4 @@
 db/
 .env
 staging.env
+token.json
