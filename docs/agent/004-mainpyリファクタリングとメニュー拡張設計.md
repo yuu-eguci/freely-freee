@@ -20,11 +20,13 @@
 
 ## 先に結論
 
-- `main.py` は最終的に「起動入口」と「終了コードの返却」だけを担当する薄いファイルにする
+- `main.py` は最終的に「起動入口」と「`SystemExit` への接続」だけを担当する薄いファイルにする
 - メニュー項目ごとの実処理は、`action_id` ごとに独立したアクションモジュールへ逃がす
 - freee API 呼び出しはアクションの中に直書きせず、`client` 層に寄せる
 - メニュー表示と選択制御は `menu` 層に閉じ込め、アクション実行の詳細を知らない状態にする
 - 新しい選択肢を増やすときは、基本的に「アクションを 1 個追加して登録する」だけで済む形を目指す
+- `menu` と `action` の境界は `MenuItem` と `ActionDefinition` を分けて明確にする
+- 共通コンテキストは `app/context.py` に置き、`actions` と `clients` の循環依存を避ける
 
 ## 現状の課題
 
@@ -68,24 +70,25 @@
 
 1. `entrypoint` 層
    - 起動入口
-   - 例外を終了コードへ変換
-   - 他の層をつなぐだけ
-2. `auth/token` 層
+   - `SystemExit` への接続
+2. `bootstrap` 層
+   - 実行順の組み立て
+   - 例外を終了コードへ寄せる薄い変換
+3. `auth/token` 層
    - 認証、リフレッシュ、トークン保存、設定ロード
-3. `menu` 層
+4. `menu` 層
    - メニュー描画、キー入力、選択確定
-4. `action` 層
-   - 選択された機能のユースケース実行
-5. `client` 層
-   - freee API との通信共通化
+5. `action/client` 層
+   - `action`: 選択された機能のユースケース実行
+   - `client`: freee API との通信共通化
 
 ### 2. 依存方向を一方通行にする
 
 依存は次の向きだけに揃えます。
 
-`entrypoint -> auth/menu/action -> client`
+`main.py -> bootstrap -> auth / menu / actions -> clients`
 
-逆向き依存は作りません。たとえば `client` が `menu` を知らない、`menu` が `client` を知らない、という形です。
+さらに、共通コンテキストは `app/context.py` に置いて、`actions` と `clients` のどちらからも参照できるようにします。これで `actions/context.py` が `clients` の型を参照して循環依存になりやすい形を避けます。
 
 ### 3. メニュー追加は「登録」で完結させる
 
@@ -95,7 +98,7 @@
 
 1. 新しいアクションモジュールを作る
 2. そのアクションをレジストリへ登録する
-3. メニュー定義に 1 行追加する
+3. メニュー項目へ変換して表示対象へ載せる
 
 ## 詳細設計
 
@@ -107,6 +110,7 @@
 └── app/
     ├── __init__.py
     ├── bootstrap.py
+    ├── context.py
     ├── config.py
     ├── exit_codes.py
     ├── errors.py
@@ -123,7 +127,6 @@
     ├── actions/
     │   ├── __init__.py
     │   ├── registry.py
-    │   ├── context.py
     │   ├── base.py
     │   ├── print_access_token.py
     │   ├── punch_clock_in.py
@@ -136,7 +139,21 @@
 
 ファイル名はたたき台ですが、責務の切り分けはこの粒度を基準にします。
 
-### 各モジュールの責務
+### 実行フロー
+
+```text
+main.py
+  -> bootstrap.run() -> int
+    -> config / auth を実行
+    -> AppContext を構築
+    -> registry.to_menu_items() で MenuItem 一覧を作る
+    -> menu.controller が action_id を返す
+    -> registry.execute() が handler を実行する
+    -> 終了コードを返す
+  -> raise SystemExit(code)
+```
+
+## 各モジュールの責務
 
 #### `main.py`
 
@@ -147,9 +164,15 @@
 #### `app/bootstrap.py`
 
 - アプリ全体の実行順を組み立てる
-- ざっくり言うと orchestrator の役割
-- 認証フロー完了後に `ActionContext` を組み立て、メニューを起動する
-- 例外を捕まえる場所ではなく、基本は例外を上へ返す
+- `run() -> int` を公開する
+- 認証フロー完了後に `AppContext` を組み立て、メニューを起動する
+- 内部では各層の例外を受け取り、終了コードへ寄せる薄い変換責務を持つ
+
+#### `app/context.py`
+
+- `AppContext` のような、アプリ全体の共通依存を束ねるデータ構造を置く
+- `actions` と `clients` の中間に置くことで、型参照による循環依存を避ける
+- `refresh_token` は持たせず、アクション実行中のトークン更新責務を `auth` 層へ漏らさない
 
 #### `app/config.py`
 
@@ -163,6 +186,7 @@
 - リフレッシュトークン更新
 - authorize URL 生成
 - OAuth レスポンス検証
+- API 認証エラーを受けた時の再認証判断材料を返す
 
 #### `app/auth/token_store.py`
 
@@ -177,19 +201,21 @@
 - `input_reader.py`: `↑/↓/Enter/Ctrl+C/Ctrl+D` の解釈
 - `models.py`: `MenuItem` など UI 用データ構造
 
-ポイントは、`menu` 層では「何の API を叩くか」を知らないことです。知るのは `action_id` までに留めます。
+ポイントは、`menu` 層では「何の API を叩くか」を知らないことです。知るのは `MenuItem` の `label` と `action_id` までに留めます。
 
 #### `app/actions/*`
 
 - 各メニュー機能の本体
 - 1 アクション = 1 モジュールを基本にする
 - `print_access_token.py` のような小さいものも、将来の統一感のためここへ置く
+- `AppContext` を受け取り、必要な `client` を使ってユースケースを実行する
 
 #### `app/actions/registry.py`
 
 - `action_id` と実行関数の対応表を持つ
 - 重複登録や未登録をここで検知する
-- メニュー定義もここ、もしくは `menu` 用定義モジュールに寄せる
+- `ActionDefinition` から `MenuItem` を組み立てる変換関数を持つ
+- `menu` 層へは `list[MenuItem]` だけを渡す
 
 #### `app/clients/*`
 
@@ -197,7 +223,7 @@
 - ベース URL、ヘッダ、タイムアウト、エラー整形をまとめる
 - アクション側は「API をどう呼ぶか」ではなく「何をしたいか」を書ける状態にする
 
-### データ構造
+## データ構造
 
 #### `MenuItem`
 
@@ -215,19 +241,20 @@ class MenuItem:
 - `description`: 将来ヘルプ表示を増やしたいときの余地
 - `enabled`: 未実装機能を見せる/隠す判断に使える余地
 
-#### `ActionContext`
+#### `AppContext`
 
 ```python
 @dataclass(frozen=True)
-class ActionContext:
+class AppContext:
     config: AppConfig
     access_token: str
-    refresh_token: str | None
     api_client: FreeeApiClient
+    debug_mode: bool = False
 ```
 
 - アクション実行に必要な共通依存を 1 つに束ねる
 - これで `execute_menu_action(action_id, access_token, config, timeout, ...)` みたいなシグネチャ崩壊を防ぐ
+- `refresh_token` は持たせない。更新責務は `auth` 層へ閉じる
 - 将来 `company_id` や `employee_id` を持たせる余地もある
 
 #### `ActionDefinition`
@@ -235,7 +262,7 @@ class ActionContext:
 ```python
 from collections.abc import Callable
 
-ActionHandler = Callable[[ActionContext], int]
+ActionHandler = Callable[[AppContext], int]
 
 @dataclass(frozen=True)
 class ActionDefinition:
@@ -243,10 +270,12 @@ class ActionDefinition:
     menu_label: str
     handler: ActionHandler
     description: str | None = None
+    debug_only: bool = False
 ```
 
 - メニュー表示に必要な情報と実行ハンドラをまとめる
 - レジストリの最小単位になる
+- `debug_only` を持たせると、`access_token` 表示のような検証用機能を通常機能と分けやすい
 
 ### メニューアクション登録方式
 
@@ -260,6 +289,7 @@ ACTIONS = (
         action_id="print_access_token",
         menu_label="あ、いや、アクセストークン取得までいけるか見たかっただけ",
         handler=print_access_token_action,
+        debug_only=True,
     ),
     ActionDefinition(
         action_id="punch_clock_in",
@@ -282,16 +312,16 @@ ACTIONS = (
 - `menu_label` が空でない
 - ハンドラが callable である
 - メニューへ出す順番が定義順で安定する
+- `debug_only=True` の項目は `debug_mode` 条件を満たす時だけ `MenuItem` 化する
 
-#### 将来の拡張余地
+#### `menu` と `action` の境界
 
-もし将来、機能数がかなり増えて「一覧ファイルが長い」問題が出てきたら、その時点でカテゴリ別レジストリへ分割します。
+- `menu` 層は `list[MenuItem]` を受け取り、選択された `action_id` を返すだけ
+- `actions` 層は `list[ActionDefinition]` を持ち、`handler` の実行責務を持つ
+- `registry.to_menu_items(definitions, *, debug_mode)` が `ActionDefinition` から `MenuItem` を組み立てる
+- `bootstrap` がその変換を実行して、`menu.controller` へ渡す
 
-- `attendance_actions.py`
-- `debug_actions.py`
-- `report_actions.py`
-
-ただし、現時点ではやりすぎなので、まずは単一レジストリで十分です。
+この分け方にしておくと、`menu` は表示と選択だけに集中できて、「どんなアクションがあるか」の知識を持ちません。
 
 ### アクション実行フロー
 
@@ -299,11 +329,10 @@ ACTIONS = (
 main.py
   -> bootstrap.run()
     -> 認証またはリフレッシュ成功
-    -> ActionContext を構築
-    -> registry からメニュー項目一覧を作る
+    -> AppContext を構築
+    -> registry.to_menu_items() でメニュー項目一覧を作る
     -> menu.controller が選択結果の action_id を返す
-    -> registry から handler を引く
-    -> handler(context) を実行
+    -> registry.execute(action_id, context) が handler を引いて実行する
     -> int の終了コードを返す
 ```
 
@@ -318,23 +347,31 @@ main.py
 - `requests` 例外のアプリ内例外への変換
 - ステータスコード異常時のメッセージ整形
 - JSON レスポンスの基本検証
+- レスポンス本文が `dict` / `list` / 空のいずれでも扱える共通返却
 
 #### 例
 
 ```python
+@dataclass(frozen=True)
+class ApiResponse:
+    status_code: int
+    headers: Mapping[str, str]
+    body: dict[str, Any] | list[Any] | None
+
+
 class FreeeApiClient:
     def __init__(self, access_token: str, timeout_seconds: int = 30) -> None: ...
 
-    def get(self, path: str, *, params: dict[str, Any] | None = None) -> dict[str, Any]: ...
-    def post(self, path: str, *, json_body: dict[str, Any] | None = None) -> dict[str, Any]: ...
+    def get(self, path: str, *, params: dict[str, Any] | None = None) -> ApiResponse: ...
+    def post(self, path: str, *, json_body: dict[str, Any] | None = None) -> ApiResponse: ...
 ```
 
 #### アクション側のイメージ
 
 ```python
-def fetch_today_attendance_action(context: ActionContext) -> int:
-    payload = context.api_client.get("/api/1/attendance")
-    print_attendance_summary(payload)
+def fetch_today_attendance_action(context: AppContext) -> int:
+    response = context.api_client.get("/api/1/attendance")
+    print_attendance_summary(response.body)
     return EXIT_CODE_OK
 ```
 
@@ -368,7 +405,18 @@ AppError
 - `menu` 層はメニュー由来の例外だけ投げる
 - `client` 層は通信由来の例外だけ投げる
 - `action` 層は「何をしようとして失敗したか」を補足して投げ直してよい
-- 最終的な終了コード変換は `main.py` か `bootstrap` のごく薄い層でまとめる
+- API 認証エラー時は `ApiAuthenticationError` で上位へ返し、必要なら `bootstrap` から `auth` 層へ再認証導線をつなぐ
+- 最終的な終了コード変換は `bootstrap.run() -> int` に寄せ、`main.py` は `SystemExit` へつなぐだけにする
+
+#### 例外責務マップ
+
+- `menu/controller.py`, `menu/input_reader.py`: `MenuEnvironmentError`, `MenuInputError`, `MenuCancelled`
+- `actions/registry.py`: `ActionRegistrationError`, `UnknownActionError`
+- `actions/*.py`: `ActionExecutionError`
+- `clients/freee_api_client.py`: `ApiConnectionError`, `ApiResponseError`, `ApiAuthenticationError`
+- `auth/oauth_service.py`: `OAuthTokenError`
+- `auth/token_store.py`: `TokenStoreError`
+- `config.py`: `ConfigError`
 
 #### 終了コード方針
 
@@ -395,17 +443,19 @@ AppError
 
 - 現在の検証用アクションとしては残してよい
 - ただし debug 系アクションとして分離し、「通常機能」とは文脈を分ける
-- 将来的には `show_masked_access_token` 的な置き換えを検討する
+- `ActionDefinition.debug_only=True` の項目として扱う
+- たとえば `DEBUG_MODE=1` のような条件を満たした時だけメニューへ出す設計にしておく
+- 将来的には `show_masked_access_token` 的な置き換えも検討する
 
 ### テストしやすさを意識した設計ポイント
 
 #### 単体テストしやすい単位
 
-- `registry`: 重複登録・未登録検知
+- `registry`: 重複登録・未登録検知、`to_menu_items()` の変換
 - `menu.input_reader`: キー入力解釈
-- `client`: エラー変換
+- `client`: エラー変換、`ApiResponse` 返却
 - `action`: context を渡した時の戻り値と例外
-- `bootstrap`: 正常系の実行順
+- `bootstrap`: 正常系の実行順、終了コード変換
 
 #### テスト観点
 
@@ -413,6 +463,7 @@ AppError
 - 未登録 `action_id` を選んだ時に安全に失敗するか
 - API 失敗時に UI 層まで例外責務が漏れないか
 - `main.py` の変更が最小に保たれているか
+- `debug_only` 項目が通常モードで出ないか
 
 ## 段階的移行方針
 
@@ -425,7 +476,7 @@ AppError
 - `errors.py`
 - `exit_codes.py`
 - `menu/models.py`
-- `actions/context.py`
+- `context.py`
 
 これで `main.py` の見通しが少し改善します。
 
@@ -441,18 +492,25 @@ AppError
 
 ここは API 通信と独立しているので、比較的安全に移せます。
 
-### Step 3. アクションレジストリを導入する
+### Step 3. アクションレジストリを hybrid で導入する
 
-この段階で `if action == ...` をやめます。
+この段階では、いきなり既存分岐を消さずに進めます。
 
 - `ActionDefinition`
-- `ActionContext`
-- `registry.get_menu_items()`
-- `registry.execute(action_id, context)`
+- `AppContext`
+- `registry.to_menu_items()`
+- `registry.execute_registered(action_id, context)`
+- `execute_menu_action()` は「登録済みならレジストリ実行、未登録なら既存 `if` 分岐へ fallback」の暫定構成にする
 
-まずは既存の `print_access_token` だけ登録すれば十分です。
+まずは既存の `print_access_token` だけ登録すれば十分です。全部を一度に移さず、1 アクションずつ登録方式へ寄せます。
 
-### Step 4. OAuth / token 保存処理を `auth` パッケージへ移す
+### Step 4. 既存アクションを順番にレジストリへ移し、fallback を縮小する
+
+- 追加済みの新アクションは最初から登録方式のみで実装する
+- 既存アクションは動作確認しながら 1 件ずつ `if` 分岐を削る
+- 最終的に fallback が空になった段階で旧 `execute_menu_action()` を取り除く
+
+### Step 5. OAuth / token 保存処理を `auth` パッケージへ移す
 
 次に認証系をまとめます。
 
@@ -466,7 +524,7 @@ AppError
 
 これで `main.py` はかなり薄くなります。
 
-### Step 5. API クライアントを導入して、新規アクションは必ずそこ経由にする
+### Step 6. API クライアントを導入して、新規アクションは必ずそこ経由にする
 
 ここで初めて「別 API を叩く機能」の土台を作ります。
 
@@ -474,7 +532,7 @@ AppError
 - 今後追加する API 機能は必ず `client` 経由にする
 - 必要なら後で既存の OAuth 通信も寄せる
 
-### Step 6. `bootstrap.run()` を作って `main.py` を薄くする
+### Step 7. `bootstrap.run()` を作って `main.py` を薄くする
 
 最後に配線を整えます。
 
@@ -488,7 +546,7 @@ AppError
 ### 新しいメニュー追加時にやること
 
 1. `app/actions/<action_name>.py` を追加する
-2. `handler(context) -> int` を実装する
+2. `handler(context: AppContext) -> int` を実装する
 3. `registry.py` に `ActionDefinition` を追加する
 4. 必要なら `clients/` に API 呼び出し関数を追加する
 
@@ -498,6 +556,7 @@ AppError
 - `menu` 層で API 通信を始める
 - アクションごとに `requests` 設定をバラバラに持つ
 - 新規アクションの追加時に巨大な `if/elif` を再導入する
+- アクションが自前で `refresh_token` を扱い始める
 
 ## この設計で得たい状態
 
@@ -510,11 +569,14 @@ AppError
 ## 今回の設計確定事項
 
 - `main.py` は最終的に入口専用へ寄せる
+- `bootstrap.run() -> int` を実行フローの中心にする
+- 共通コンテキストは `app/context.py` に置き、`actions` と `clients` の循環依存を避ける
 - メニューアクションは静的レジストリ方式で登録する
-- 各アクションは `ActionContext` を受け取る独立ハンドラとして実装する
-- freee API 呼び出しは `client` 層へ集約する
-- 例外は `menu` / `action` / `client` ごとに責務を分ける
-- 移行は段階的に進め、一気に全面書き換えしない
+- `menu` は `MenuItem`、`actions` は `ActionDefinition` を扱い、境界を分ける
+- 各アクションは `AppContext` を受け取る独立ハンドラとして実装する
+- `refresh_token` の責務は `auth` 層に閉じる
+- freee API 呼び出しは `client` 層へ集約し、戻り値は `ApiResponse` でラップする
+- 移行は hybrid 段階を挟みながら進め、一気に全面書き換えしない
 
 ## レビュー観点
 
@@ -522,14 +584,16 @@ AppError
 - `action_id` の登録漏れや重複を検知できるか
 - `menu` 層が業務知識を持っていないか
 - `client` 層に HTTP 共通化が寄っているか
+- `debug_only` 項目の表示条件が明確か
 - 段階移行の途中でも既存の認証フローを壊さないか
 
 ## オーナー向け要約
 
 - 今回の設計では、`main.py` を薄くして、メニュー追加や API 追加のたびに中央ファイルが太る状態を止めます
 - メニュー項目ごとの処理はアクションとして独立させ、登録ベースで増やせる形にします
+- `menu` と `action` の間には `MenuItem` / `ActionDefinition` の境界を置き、責務を混ぜません
 - API 呼び出しはクライアント層へまとめ、認証ヘッダやエラー処理の散らばりを防ぎます
-- いきなり全面移植せず、定義分離 -> メニュー分離 -> レジストリ導入 -> 認証分離 -> クライアント導入の順で安全に進めます
+- いきなり全面移植せず、hybrid 段階を挟みながら安全に移行します
 
 ## レビュー
 
@@ -537,136 +601,38 @@ AppError
 
 #### 1. `ActionContext` の `api_client` 参照が循環依存を生むリスク
 
-**指摘箇所**: `ActionContext` の定義 (220-227 行目)
-
-```python
-@dataclass(frozen=True)
-class ActionContext:
-    config: AppConfig
-    access_token: str
-    refresh_token: str | None
-    api_client: FreeeApiClient
-```
-
-`ActionContext` を `actions/context.py` へ置くとして、`FreeeApiClient` は `clients/freee_api_client.py` にあるから、`actions` が `clients` へ依存することになる。これは設計方針 (82-88 行目) で示した依存方向には合致しているけど、`context.py` の中で型ヒントに `FreeeApiClient` を書いた瞬間、`from app.clients import FreeeApiClient` が必要になって、`clients` 側が `ActionContext` を参照したくなるケースが出ると循環依存が起きやすい。
-
-**推奨修正案**:
-
-- `api_client` をそのまま持つなら、`ActionContext` の定義場所を `actions/` ではなくもっと上位 (例: `app/context.py` や `app/core.py`) へ移す
-- または `api_client` 渡しを遅延注入にして、`ActionContext` は `access_token` だけ持ち、`client` は handler 内で受け取る形にする
-
-あたしは前者 (定義場所の移動) を推すよ。
+対応内容: `ActionContext` を `actions/context.py` に置く案をやめて、共通コンテキストを `app/context.py` の `AppContext` へ移しました。これで `actions` と `clients` のどちらからも参照しやすくなり、型参照由来の循環依存リスクを下げています。
 
 #### 2. `refresh_token` を `ActionContext` に常時持たせるべきか検討不足
 
-**指摘箇所**: 225 行目 `refresh_token: str | None`
-
-アクション実行中に refresh が必要になる設計を想定してるなら分かるけど、`bootstrap.py` で認証済みの状態で `ActionContext` を組み立てるなら、`refresh_token` はアクション実行フェーズでは不要なはず。もしトークン更新が必要になったら、それはアクションの責務じゃなくて `auth` 層の再実行になるべきだから、ここに持たせる理由が弱い。
-
-**推奨修正案**:
-
-- `ActionContext` には `access_token` だけを持たせる
-- refresh の責務は `auth/token_store` や `auth/oauth_service` へ閉じる
-- アクション中に API 認証エラーが出たら、一旦 `ApiAuthenticationError` で落として、呼び出し元で再認証判断する設計にする
-
-これで責務がもっと明確になるw
+対応内容: `AppContext` から `refresh_token` を外しました。トークン更新責務は `auth/oauth_service.py` と `auth/token_store.py` に閉じ、アクション中に認証エラーが起きた場合は `ApiAuthenticationError` を上位へ返す方針へ修正しました。
 
 #### 3. `menu` 層が `ActionDefinition` の `menu_label` に依存する設計が曖昧
 
-**指摘箇所**: 203-210 行目 (`MenuItem`) と 235-247 行目 (`ActionDefinition`)
-
-設計では `menu` 層は `action_id` までしか知らないと書いてるけど (180 行目)、メニューへ出す項目一覧は `registry` から作るって流れ (303 行目) だと、実際には `ActionDefinition` の `menu_label` をメニュー側が参照してることになる。
-
-この責務境界がブレてるから、「メニュー定義」の主体が `menu` なのか `actions` なのかが見えにくい。
-
-**推奨修正案**:
-
-- `MenuItem` と `ActionDefinition` を明確に分ける
-- `menu` パッケージは `list[MenuItem]` だけ受け取る
-- `registry` は `list[ActionDefinition]` から `list[MenuItem]` への変換関数 (例: `to_menu_items()`) を提供する
-- `bootstrap` がその変換を実行して、`menu.controller` へ渡す
-
-これで依存方向が明確になる。
+対応内容: `MenuItem` と `ActionDefinition` の境界を明示し、`registry.to_menu_items()` を追加する方針へ修正しました。`menu` 層は `list[MenuItem]` だけを受け取り、`bootstrap` が変換を担当する流れにしています。
 
 #### 4. 段階的移行の Step 3 で既存処理が壊れる危険が高い
 
-**指摘箇所**: 444-453 行目
-
-Step 3 で `if action == ...` をいきなりやめるとしているけど、その時点で既存の全アクションを登録済みの形へ書き換えないと動かなくなる。段階的と言いながら、この Step だけ all-or-nothing 移行になってしまって、リスクが高い。
-
-**推奨修正案**:
-
-- Step 3 の前に、まず `execute_menu_action()` を「文字列 fallback 付きのレジストリ実行」へ置き換える中間段階を挟む
-- つまり、「レジストリに登録されていたらそこを実行、なければ既存 `if` 文へ fallback」という hybrid 実装を一時的に許容する
-- これで 1 個ずつアクションを登録形式へ移していけるから、既存フローを壊さずに進められる
-
-あと、Step の番号が 1 ~ 6 まであるけど、最初の 2 つはともかく、3 以降はもう少し粒度を細かく切った方が安全だと思うw
+対応内容: 段階移行を見直し、Step 3 を hybrid 導入へ変更しました。登録済みアクションはレジストリ実行、未登録アクションは既存 `if` 分岐へ fallback する暫定構成を許容し、Step 4 で段階的に fallback を削る流れへ直しています。
 
 #### 5. `FreeeApiClient.get() / post()` の戻り値が `dict[str, Any]` 固定なのは制約がキツい
 
-**指摘箇所**: 328-329 行目
+対応内容: 戻り値を `ApiResponse` ラッパーへ変更しました。`status_code` / `headers` / `body` をまとめて扱える形にし、`body` は `dict` / `list` / `None` を許容する設計へ修正しました。
 
-freee API のレスポンスがすべて JSON オブジェクトとは限らない。もしリスト形式や、空ボディ (204 No Content など) が返ってくる API があったら、この戻り値型だと対応できなくなる。
-
-**推奨修正案**:
-
-- 戻り値を `Any` にする、または `dict[str, Any] | list[Any]` とする
-- もしくは成功時のレスポンス全体を `ApiResponse` 的なラッパーで返す設計にして、body / status / headers をまとめて扱えるようにする
-
-あたし的には `ApiResponse` wrapper を推すけど、初期段階なら `dict | list` でもまあ許容範囲かなw
-
----
-
-### 軽微な指摘 (直さなくても動くけど、気になる箇所)
+### 軽微な指摘
 
 #### 6. `bootstrap.py` が "orchestrator" と書いてるけど、責務定義がざっくりしすぎている
 
-147-152 行目で「orchestrator の役割」と書いてあるけど、実際にどこまでやるのかがまだ曖昧。例外を上へ返すと書いてあるのに、`main.py` へ何を返すのかが不明。
-
-**推奨対応**:
-
-- `bootstrap.run() -> int` を明記する
-- もしくは `bootstrap.run()` は例外を投げるだけで、`main.py` が捕まえて終了コードへ変換する設計にするなら、そう書いておく
+対応内容: `bootstrap.run() -> int` を明記し、`main.py` は `SystemExit` 接続だけを担当する形へ整理しました。
 
 #### 7. 例外階層が充実してる割に、各例外が「どの層で投げられるか」の対応表がない
 
-345-364 行目で例外定義は丁寧に書いてあるけど、どのモジュールがどの例外を投げるかの責務マップがまだない。
-
-**推奨対応**:
-
-- 例外階層の下に、「この例外は `menu/controller.py` が投げる」みたいな対応表を追加する
-- これでレビュー時に「`client` 層なのに `MenuError` 投げてるじゃん」って指摘がしやすくなる
+対応内容: 例外責務マップを追加し、どのモジュールがどの例外を投げるかを一覧で見えるようにしました。
 
 #### 8. `access_token` 生表示の扱いが「将来検討」止まりで、セキュリティリスクが放置されてる
 
-395-398 行目で「debug 系アクションとして分離」とは書いてあるけど、実際にどう分けるかの設計がない。
-
-**推奨対応**:
-
-- 今回の設計段階で、`debug_actions` 用の登録フラグ (例: `debug_only=True`) を `ActionDefinition` へ持たせる想定を追加する
-- または環境変数 `DEBUG_MODE=1` がないとメニューに出ない、みたいなルールを書いておく
-
-これで実装時に迷わなくなるw
+対応内容: `ActionDefinition.debug_only` を追加し、`DEBUG_MODE=1` のような条件でのみ表示対象に載せる設計を明記しました。
 
 #### 9. ディレクトリ構成で `app/config.py` と `app/bootstrap.py` の配置が並列になってるけど、依存関係が不明
 
-104-135 行目の構成で、`bootstrap` が `config` を読むのか、`main` が両方を読むのかが見えない。
-
-**推奨対応**:
-
-- `bootstrap.run()` が最初に `config.load()` を呼ぶ設計なら、そのフロー図を追加する
-- または `main.py` が `config` を読んで `bootstrap.run(config)` へ渡す形なのか明記する
-
----
-
-### まとめ
-
-設計の方向性と層分離の考え方はすごく良いし、責務の分け方も明確で将来性もあると思う♡
-
-ただ、上で指摘した 5 つの修正必須点を直さないと、実装段階で設計のブレや循環依存が出て、結局リファクタが手戻りになる可能性が高い。
-
-特に 1 (循環依存リスク)、2 (refresh_token 責務)、3 (menu と action の境界) は、実装前に決着つけとかないとマズいw
-
-軽微な指摘 4 つはあとからでも直せるけど、設計ノートとして残すなら書いておいた方がレビューしやすくなるから、できれば盛り込んでほしいかな。
-
-以上ー!
+対応内容: 実行フロー図を追加し、`bootstrap.run()` が `config` / `auth` を呼んでから `AppContext` を構築する流れを明記しました。
