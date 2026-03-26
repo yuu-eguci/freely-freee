@@ -19,7 +19,8 @@ docker compose exec app python --version
 docker compose exec app python main.py
 # => Python 3.12.x
 docker compose down
-docker compose run --rm app python main.py
+docker compose run --rm app pipenv run python main.py
+docker compose run --rm app pipenv run python main.py --auth-code AUTH_CODE
 
 docker compose run --rm app pipenv install requests
 docker compose run --rm app pipenv install --dev ruff
