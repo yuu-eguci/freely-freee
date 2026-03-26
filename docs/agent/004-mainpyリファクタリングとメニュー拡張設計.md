@@ -530,3 +530,143 @@ AppError
 - メニュー項目ごとの処理はアクションとして独立させ、登録ベースで増やせる形にします
 - API 呼び出しはクライアント層へまとめ、認証ヘッダやエラー処理の散らばりを防ぎます
 - いきなり全面移植せず、定義分離 -> メニュー分離 -> レジストリ導入 -> 認証分離 -> クライアント導入の順で安全に進めます
+
+## レビュー
+
+### 修正必須点
+
+#### 1. `ActionContext` の `api_client` 参照が循環依存を生むリスク
+
+**指摘箇所**: `ActionContext` の定義 (220-227 行目)
+
+```python
+@dataclass(frozen=True)
+class ActionContext:
+    config: AppConfig
+    access_token: str
+    refresh_token: str | None
+    api_client: FreeeApiClient
+```
+
+`ActionContext` を `actions/context.py` へ置くとして、`FreeeApiClient` は `clients/freee_api_client.py` にあるから、`actions` が `clients` へ依存することになる。これは設計方針 (82-88 行目) で示した依存方向には合致しているけど、`context.py` の中で型ヒントに `FreeeApiClient` を書いた瞬間、`from app.clients import FreeeApiClient` が必要になって、`clients` 側が `ActionContext` を参照したくなるケースが出ると循環依存が起きやすい。
+
+**推奨修正案**:
+
+- `api_client` をそのまま持つなら、`ActionContext` の定義場所を `actions/` ではなくもっと上位 (例: `app/context.py` や `app/core.py`) へ移す
+- または `api_client` 渡しを遅延注入にして、`ActionContext` は `access_token` だけ持ち、`client` は handler 内で受け取る形にする
+
+あたしは前者 (定義場所の移動) を推すよ。
+
+#### 2. `refresh_token` を `ActionContext` に常時持たせるべきか検討不足
+
+**指摘箇所**: 225 行目 `refresh_token: str | None`
+
+アクション実行中に refresh が必要になる設計を想定してるなら分かるけど、`bootstrap.py` で認証済みの状態で `ActionContext` を組み立てるなら、`refresh_token` はアクション実行フェーズでは不要なはず。もしトークン更新が必要になったら、それはアクションの責務じゃなくて `auth` 層の再実行になるべきだから、ここに持たせる理由が弱い。
+
+**推奨修正案**:
+
+- `ActionContext` には `access_token` だけを持たせる
+- refresh の責務は `auth/token_store` や `auth/oauth_service` へ閉じる
+- アクション中に API 認証エラーが出たら、一旦 `ApiAuthenticationError` で落として、呼び出し元で再認証判断する設計にする
+
+これで責務がもっと明確になるw
+
+#### 3. `menu` 層が `ActionDefinition` の `menu_label` に依存する設計が曖昧
+
+**指摘箇所**: 203-210 行目 (`MenuItem`) と 235-247 行目 (`ActionDefinition`)
+
+設計では `menu` 層は `action_id` までしか知らないと書いてるけど (180 行目)、メニューへ出す項目一覧は `registry` から作るって流れ (303 行目) だと、実際には `ActionDefinition` の `menu_label` をメニュー側が参照してることになる。
+
+この責務境界がブレてるから、「メニュー定義」の主体が `menu` なのか `actions` なのかが見えにくい。
+
+**推奨修正案**:
+
+- `MenuItem` と `ActionDefinition` を明確に分ける
+- `menu` パッケージは `list[MenuItem]` だけ受け取る
+- `registry` は `list[ActionDefinition]` から `list[MenuItem]` への変換関数 (例: `to_menu_items()`) を提供する
+- `bootstrap` がその変換を実行して、`menu.controller` へ渡す
+
+これで依存方向が明確になる。
+
+#### 4. 段階的移行の Step 3 で既存処理が壊れる危険が高い
+
+**指摘箇所**: 444-453 行目
+
+Step 3 で `if action == ...` をいきなりやめるとしているけど、その時点で既存の全アクションを登録済みの形へ書き換えないと動かなくなる。段階的と言いながら、この Step だけ all-or-nothing 移行になってしまって、リスクが高い。
+
+**推奨修正案**:
+
+- Step 3 の前に、まず `execute_menu_action()` を「文字列 fallback 付きのレジストリ実行」へ置き換える中間段階を挟む
+- つまり、「レジストリに登録されていたらそこを実行、なければ既存 `if` 文へ fallback」という hybrid 実装を一時的に許容する
+- これで 1 個ずつアクションを登録形式へ移していけるから、既存フローを壊さずに進められる
+
+あと、Step の番号が 1 ~ 6 まであるけど、最初の 2 つはともかく、3 以降はもう少し粒度を細かく切った方が安全だと思うw
+
+#### 5. `FreeeApiClient.get() / post()` の戻り値が `dict[str, Any]` 固定なのは制約がキツい
+
+**指摘箇所**: 328-329 行目
+
+freee API のレスポンスがすべて JSON オブジェクトとは限らない。もしリスト形式や、空ボディ (204 No Content など) が返ってくる API があったら、この戻り値型だと対応できなくなる。
+
+**推奨修正案**:
+
+- 戻り値を `Any` にする、または `dict[str, Any] | list[Any]` とする
+- もしくは成功時のレスポンス全体を `ApiResponse` 的なラッパーで返す設計にして、body / status / headers をまとめて扱えるようにする
+
+あたし的には `ApiResponse` wrapper を推すけど、初期段階なら `dict | list` でもまあ許容範囲かなw
+
+---
+
+### 軽微な指摘 (直さなくても動くけど、気になる箇所)
+
+#### 6. `bootstrap.py` が "orchestrator" と書いてるけど、責務定義がざっくりしすぎている
+
+147-152 行目で「orchestrator の役割」と書いてあるけど、実際にどこまでやるのかがまだ曖昧。例外を上へ返すと書いてあるのに、`main.py` へ何を返すのかが不明。
+
+**推奨対応**:
+
+- `bootstrap.run() -> int` を明記する
+- もしくは `bootstrap.run()` は例外を投げるだけで、`main.py` が捕まえて終了コードへ変換する設計にするなら、そう書いておく
+
+#### 7. 例外階層が充実してる割に、各例外が「どの層で投げられるか」の対応表がない
+
+345-364 行目で例外定義は丁寧に書いてあるけど、どのモジュールがどの例外を投げるかの責務マップがまだない。
+
+**推奨対応**:
+
+- 例外階層の下に、「この例外は `menu/controller.py` が投げる」みたいな対応表を追加する
+- これでレビュー時に「`client` 層なのに `MenuError` 投げてるじゃん」って指摘がしやすくなる
+
+#### 8. `access_token` 生表示の扱いが「将来検討」止まりで、セキュリティリスクが放置されてる
+
+395-398 行目で「debug 系アクションとして分離」とは書いてあるけど、実際にどう分けるかの設計がない。
+
+**推奨対応**:
+
+- 今回の設計段階で、`debug_actions` 用の登録フラグ (例: `debug_only=True`) を `ActionDefinition` へ持たせる想定を追加する
+- または環境変数 `DEBUG_MODE=1` がないとメニューに出ない、みたいなルールを書いておく
+
+これで実装時に迷わなくなるw
+
+#### 9. ディレクトリ構成で `app/config.py` と `app/bootstrap.py` の配置が並列になってるけど、依存関係が不明
+
+104-135 行目の構成で、`bootstrap` が `config` を読むのか、`main` が両方を読むのかが見えない。
+
+**推奨対応**:
+
+- `bootstrap.run()` が最初に `config.load()` を呼ぶ設計なら、そのフロー図を追加する
+- または `main.py` が `config` を読んで `bootstrap.run(config)` へ渡す形なのか明記する
+
+---
+
+### まとめ
+
+設計の方向性と層分離の考え方はすごく良いし、責務の分け方も明確で将来性もあると思う♡
+
+ただ、上で指摘した 5 つの修正必須点を直さないと、実装段階で設計のブレや循環依存が出て、結局リファクタが手戻りになる可能性が高い。
+
+特に 1 (循環依存リスク)、2 (refresh_token 責務)、3 (menu と action の境界) は、実装前に決着つけとかないとマズいw
+
+軽微な指摘 4 つはあとからでも直せるけど、設計ノートとして残すなら書いておいた方がレビューしやすくなるから、できれば盛り込んでほしいかな。
+
+以上ー!
