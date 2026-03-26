@@ -218,6 +218,7 @@ def print_authorize_instructions(config: AppConfig) -> None:
 
 
 def main() -> int:
+    # とりあえずコマンドライン引数を取得します。
     args = parse_args()
 
     try:
@@ -226,6 +227,8 @@ def main() -> int:
         print(f"[CONFIG ERROR] {exc}", file=sys.stderr)
         return 1
 
+    # AUTH_CODE ある -> それ使ってアクセス/リフレッシュトークンを取得 -> token.json に保存。
+    # ない -> もう token.json があるやろ、っていう気持ちで実行されたと思われる -> 続行。
     auth_code = args.auth_code
     if auth_code:
         try:
@@ -239,6 +242,7 @@ def main() -> int:
         print("認可コードでトークンを取得し、token.json を更新しました。")
         return 0
 
+    # いや token.json ねーじゃねーかｗ -> 終了。
     try:
         refresh_token = load_refresh_token()
     except TokenStoreError as exc:
@@ -246,6 +250,7 @@ def main() -> int:
         print_authorize_instructions(config)
         return 1
 
+    # リフレッシュトークンからアクセストークンを取得します。
     try:
         token_payload = refresh_access_token(config, refresh_token)
         save_tokens(token_payload)
@@ -259,4 +264,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # 0 とか 1 の返り値を sys.exit() に渡すやつです。
+    # NOTE: へー、こんなのあったんだ。
     raise SystemExit(main())
