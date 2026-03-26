@@ -15,7 +15,11 @@ services:
     working_dir: /app
     volumes:
       - ./:/app
-      # ホスト側のマウントがコンテナ内の .venv を上書きしないようにします。
+      # こっち↑は bind mount.
+      # こっち↓は anonymous volume. コンテナの中の、このボリュームだけは、同期しないよって設定。
+      # NOTE: Dockerfile で予め pipenv sync する作りにしてる。そのあとマウントで、上書きしちゃわないようにしています。
+      #       この方式だと、たとえば、コンテナの中の venv も動くし、ホスト側で pipenv sync しても、コンテナ内とは
+      #       同期されないから、別々の環境で main.py を動かすことだってできる。
       - /app/.venv
     # コンテナを起動したままにする。
     tty: true
