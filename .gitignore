@@ -6,3 +6,5 @@ db/
 .env
 staging.env
 token.json
+__pycache__/
+*.pyc

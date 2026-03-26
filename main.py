@@ -3,9 +3,11 @@ import json
 import os
 import secrets
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlencode
 
 import requests
@@ -15,6 +17,16 @@ AUTHORIZE_URL = "https://accounts.secure.freee.co.jp/public_api/authorize"
 TOKEN_URL = "https://accounts.secure.freee.co.jp/public_api/token"
 TOKEN_FILE_PATH = Path("token.json")
 REQUEST_TIMEOUT_SECONDS = 30
+
+EXIT_CODE_OK = 0
+EXIT_CODE_APP_ERROR = 1
+EXIT_CODE_MENU_ERROR = 2
+EXIT_CODE_CANCELLED = 130
+
+MENU_ACTION_PRINT_ACCESS_TOKEN = "print_access_token"
+POST_TOKEN_MENU_ITEMS = (
+    ("あ、いや、アクセストークン取得までいけるか見たかっただけ", MENU_ACTION_PRINT_ACCESS_TOKEN),
+)
 
 
 class AppError(Exception):
@@ -33,11 +45,33 @@ class OAuthTokenError(AppError):
     """Raised when token endpoint communication fails."""
 
 
+class MenuError(AppError):
+    """Base exception for interactive menu errors."""
+
+
+class MenuEnvironmentError(MenuError):
+    """Raised when interactive menu cannot be shown in current terminal."""
+
+
+class MenuInputError(MenuError):
+    """Raised when menu input stream is invalid or interrupted unexpectedly."""
+
+
+class MenuCancelled(MenuError):
+    """Raised when user cancels menu explicitly."""
+
+
 @dataclass(frozen=True)
 class AppConfig:
     client_id: str
     client_secret: str
     redirect_uri: str
+
+
+@dataclass(frozen=True)
+class MenuItem:
+    label: str
+    action: str
 
 
 def parse_args() -> argparse.Namespace:
@@ -236,55 +270,204 @@ def print_authorize_instructions(config: AppConfig) -> None:
     print("python main.py --auth-code <認可コード>", file=sys.stderr)
 
 
+def require_access_token(token_payload: dict[str, Any]) -> str:
+    """トークンレスポンスから access_token を取り出します。"""
+
+    access_token = token_payload.get("access_token")
+    if not isinstance(access_token, str) or not access_token:
+        raise OAuthTokenError("Token endpoint response missing access_token")
+    return access_token
+
+
+def build_post_token_menu_items() -> list[MenuItem]:
+    """アクセストークン取得直後のメニュー項目を返します。"""
+
+    return [MenuItem(label=label, action=action) for label, action in POST_TOKEN_MENU_ITEMS]
+
+
+def ensure_menu_terminal() -> None:
+    """メニュー描画に必要な端末条件をチェックします。"""
+
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        raise MenuEnvironmentError(
+            "Interactive menu requires TTY stdin/stdout. Please run in a terminal."
+        )
+
+
+@contextmanager
+def raw_stdin_mode() -> Iterator[None]:
+    """stdin を一時的に raw モードに切り替えます。"""
+
+    try:
+        import termios
+        import tty
+    except ImportError as exc:
+        raise MenuEnvironmentError("Raw terminal input is not supported on this platform.") from exc
+
+    try:
+        stdin_fd = sys.stdin.fileno()
+    except OSError as exc:
+        raise MenuEnvironmentError("stdin file descriptor is not available.") from exc
+
+    try:
+        original_mode = termios.tcgetattr(stdin_fd)
+    except termios.error as exc:
+        raise MenuEnvironmentError("Failed to read terminal mode.") from exc
+
+    try:
+        tty.setraw(stdin_fd)
+        yield
+    finally:
+        termios.tcsetattr(stdin_fd, termios.TCSADRAIN, original_mode)
+
+
+def render_menu(items: list[MenuItem], selected_index: int, *, initial: bool) -> None:
+    """メニューを描画します。"""
+
+    if initial:
+        print("今回は何をしたい? (↑↓で選択 / Enterで決定 / Ctrl+Cで中断)")
+    else:
+        sys.stdout.write(f"\x1b[{len(items)}F")
+
+    for index, item in enumerate(items):
+        prefix = ">" if index == selected_index else " "
+        sys.stdout.write(f"{prefix} {item.label}\x1b[K\n")
+    sys.stdout.flush()
+
+
+def read_menu_key() -> Literal["up", "down", "enter", "ignore"]:
+    """メニュー操作用のキー入力を 1 件読み取ります。"""
+
+    first = sys.stdin.buffer.read(1)
+    if first == b"":
+        raise MenuInputError("Reached EOF while waiting for menu input.")
+    if first in (b"\r", b"\n"):
+        return "enter"
+    if first == b"\x03":
+        raise MenuCancelled("Menu cancelled by user.")
+    if first == b"\x04":
+        raise MenuInputError("Received EOF (Ctrl+D) while waiting for menu input.")
+    if first != b"\x1b":
+        return "ignore"
+
+    second = sys.stdin.buffer.read(1)
+    if second == b"":
+        raise MenuInputError("Incomplete escape sequence: missing second byte.")
+    if second != b"[":
+        return "ignore"
+
+    third = sys.stdin.buffer.read(1)
+    if third == b"":
+        raise MenuInputError("Incomplete escape sequence: missing third byte.")
+    if third == b"A":
+        return "up"
+    if third == b"B":
+        return "down"
+    return "ignore"
+
+
+def select_menu_action(items: list[MenuItem]) -> MenuItem:
+    """上下カーソル + Enter でメニュー項目を選択します。"""
+
+    if not items:
+        raise MenuInputError("No menu items are available.")
+
+    ensure_menu_terminal()
+    selected_index = 0
+
+    with raw_stdin_mode():
+        render_menu(items, selected_index, initial=True)
+        while True:
+            key = read_menu_key()
+            if key == "enter":
+                return items[selected_index]
+            if key == "up":
+                next_index = max(0, selected_index - 1)
+                if next_index != selected_index:
+                    selected_index = next_index
+                    render_menu(items, selected_index, initial=False)
+                continue
+            if key == "down":
+                next_index = min(len(items) - 1, selected_index + 1)
+                if next_index != selected_index:
+                    selected_index = next_index
+                    render_menu(items, selected_index, initial=False)
+
+
+def execute_menu_action(action: str, access_token: str) -> int:
+    """選択されたメニューアクションを実行します。"""
+
+    if action == MENU_ACTION_PRINT_ACCESS_TOKEN:
+        print(f"access_token: {access_token}")
+        return EXIT_CODE_OK
+
+    raise MenuInputError(f"Unknown menu action: {action}")
+
+
+def run_post_token_menu(access_token: str) -> int:
+    """アクセストークン取得直後のメニューを実行します。"""
+
+    selected_item = select_menu_action(build_post_token_menu_items())
+    return execute_menu_action(selected_item.action, access_token)
+
+
+def run_post_token_menu_with_error_mapping(access_token: str) -> int:
+    """メニュー例外を終了コードへ変換します。"""
+
+    try:
+        return run_post_token_menu(access_token)
+    except MenuCancelled as exc:
+        print(f"[MENU CANCELLED] {exc}", file=sys.stderr)
+        return EXIT_CODE_CANCELLED
+    except (MenuEnvironmentError, MenuInputError) as exc:
+        print(f"[MENU ERROR] {exc}", file=sys.stderr)
+        return EXIT_CODE_MENU_ERROR
+
+
 def main() -> int:
     """メインの処理を実行します。"""
 
-    # とりあえずコマンドライン引数を取得します。
     args = parse_args()
 
     try:
         config = load_config()
     except ConfigError as exc:
         print(f"[CONFIG ERROR] {exc}", file=sys.stderr)
-        return 1
+        return EXIT_CODE_APP_ERROR
 
-    # AUTH_CODE ある -> それ使ってアクセス/リフレッシュトークンを取得 -> token.json に保存。
-    # ない -> もう token.json があるやろ、っていう気持ちで実行されたと思われる -> 続行。
     auth_code = args.auth_code
     if auth_code:
         try:
             token_payload = exchange_auth_code(config, auth_code)
             save_tokens(token_payload)
+            access_token = require_access_token(token_payload)
         except (OAuthTokenError, TokenStoreError) as exc:
             print(f"[AUTH CODE FLOW ERROR] {exc}", file=sys.stderr)
             print_authorize_instructions(config)
-            return 1
+            return EXIT_CODE_APP_ERROR
 
         print("認可コードでトークンを取得し、token.json を更新しました。")
-        return 0
+        return run_post_token_menu_with_error_mapping(access_token)
 
-    # いや token.json ねーじゃねーかｗ -> 終了。
     try:
         refresh_token = load_refresh_token()
     except TokenStoreError as exc:
         print(f"[TOKEN FILE ERROR] {exc}", file=sys.stderr)
         print_authorize_instructions(config)
-        return 1
+        return EXIT_CODE_APP_ERROR
 
-    # リフレッシュトークンからアクセストークンを取得します。
     try:
         token_payload = refresh_access_token(config, refresh_token)
         save_tokens(token_payload)
+        access_token = require_access_token(token_payload)
     except (OAuthTokenError, TokenStoreError) as exc:
         print(f"[REFRESH FLOW ERROR] {exc}", file=sys.stderr)
         print_authorize_instructions(config)
-        return 1
+        return EXIT_CODE_APP_ERROR
 
     print("リフレッシュトークンでアクセストークンを更新し、token.json を更新しました。")
-    return 0
+    return run_post_token_menu_with_error_mapping(access_token)
 
 
 if __name__ == "__main__":
-    # 0 とか 1 の返り値を sys.exit() に渡すやつです。
-    # NOTE: へー、こんなのあったんだ。
     raise SystemExit(main())
