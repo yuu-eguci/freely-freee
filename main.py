@@ -41,6 +41,8 @@ class AppConfig:
 
 
 def parse_args() -> argparse.Namespace:
+    """コマンドライン引数を解析します。"""
+
     parser = argparse.ArgumentParser(description="freee OAuth token bootstrap utility")
     parser.add_argument(
         "--auth-code",
@@ -51,6 +53,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def require_env(name: str) -> str:
+    """環境変数から値を取得し、存在しない場合や空の場合は例外を投げます。"""
+
     value = os.getenv(name)
     if value is None:
         raise ConfigError(f"Missing required environment variable: {name}")
@@ -61,6 +65,8 @@ def require_env(name: str) -> str:
 
 
 def load_config() -> AppConfig:
+    """環境変数からアプリケーション設定を読み込みます。"""
+
     return AppConfig(
         client_id=require_env("FREEE_CLIENT_ID"),
         client_secret=require_env("FREEE_CLIENT_SECRET"),
@@ -69,6 +75,8 @@ def load_config() -> AppConfig:
 
 
 def build_authorize_url(config: AppConfig) -> tuple[str, str]:
+    """認可 URL を構築し、state を生成して返します。"""
+
     state = secrets.token_urlsafe(32)
     params = urlencode(
         {
@@ -83,6 +91,7 @@ def build_authorize_url(config: AppConfig) -> tuple[str, str]:
 
 
 def parse_token_response(response: Response) -> dict[str, Any]:
+    """トークンエンドポイントのレスポンスを解析します。"""
     try:
         payload = response.json()
     except ValueError as exc:
@@ -111,6 +120,8 @@ def parse_token_response(response: Response) -> dict[str, Any]:
 
 
 def post_token(payload: dict[str, str]) -> dict[str, Any]:
+    """トークンエンドポイントにリクエストを送信し、レスポンスを解析します。"""
+
     try:
         response = requests.post(
             TOKEN_URL,
@@ -128,6 +139,8 @@ def post_token(payload: dict[str, str]) -> dict[str, Any]:
 
 
 def exchange_auth_code(config: AppConfig, auth_code: str) -> dict[str, Any]:
+    """認可コードを使用してアクセストークンを取得します。"""
+
     if not auth_code.strip():
         raise OAuthTokenError("Received an empty authorization code")
     return post_token(
@@ -142,6 +155,8 @@ def exchange_auth_code(config: AppConfig, auth_code: str) -> dict[str, Any]:
 
 
 def refresh_access_token(config: AppConfig, refresh_token: str) -> dict[str, Any]:
+    """リフレッシュトークンを使用してアクセストークンを更新します。"""
+
     if not refresh_token.strip():
         raise OAuthTokenError("Refresh token is empty")
     return post_token(
@@ -155,6 +170,8 @@ def refresh_access_token(config: AppConfig, refresh_token: str) -> dict[str, Any
 
 
 def save_tokens(token_payload: dict[str, Any]) -> None:
+    """トークン情報を token.json に保存します。"""
+
     access_token = token_payload.get("access_token")
     refresh_token = token_payload.get("refresh_token")
     if not isinstance(access_token, str) or not access_token:
@@ -176,6 +193,8 @@ def save_tokens(token_payload: dict[str, Any]) -> None:
 
 
 def load_refresh_token() -> str:
+    """token.json からリフレッシュトークンを読み込みます。"""
+
     if not TOKEN_FILE_PATH.exists():
         raise TokenStoreError(f"{TOKEN_FILE_PATH} does not exist")
     if not TOKEN_FILE_PATH.is_file():
@@ -201,6 +220,8 @@ def load_refresh_token() -> str:
 
 
 def print_authorize_instructions(config: AppConfig) -> None:
+    """認可コードを再取得するための指示を表示します。"""
+
     authorize_url, state = build_authorize_url(config)
     print(
         "\n認可コードを再取得してください。以下の URL をブラウザで開いてください:",
@@ -216,6 +237,8 @@ def print_authorize_instructions(config: AppConfig) -> None:
 
 
 def main() -> int:
+    """メインの処理を実行します。"""
+
     # とりあえずコマンドライン引数を取得します。
     args = parse_args()
 
