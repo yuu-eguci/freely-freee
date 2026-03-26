@@ -10,9 +10,13 @@ services:
       PYTHONDONTWRITEBYTECODE: "1"
       # stdout/stderr バッファしない。
       PYTHONUNBUFFERED: "1"
+      # 仮想環境をプロジェクト直下 (/app/.venv) に作ります。
+      PIPENV_VENV_IN_PROJECT: "1"
     working_dir: /app
     volumes:
       - ./:/app
+      # ホスト側のマウントがコンテナ内の .venv を上書きしないようにします。
+      - /app/.venv
     # コンテナを起動したままにする。
     tty: true
     stdin_open: true
