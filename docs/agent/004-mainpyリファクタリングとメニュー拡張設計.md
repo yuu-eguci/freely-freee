@@ -587,14 +587,6 @@ AppError
 - `debug_only` 項目の表示条件が明確か
 - 段階移行の途中でも既存の認証フローを壊さないか
 
-## オーナー向け要約
-
-- 今回の設計では、`main.py` を薄くして、メニュー追加や API 追加のたびに中央ファイルが太る状態を止めます
-- メニュー項目ごとの処理はアクションとして独立させ、登録ベースで増やせる形にします
-- `menu` と `action` の間には `MenuItem` / `ActionDefinition` の境界を置き、責務を混ぜません
-- API 呼び出しはクライアント層へまとめ、認証ヘッダやエラー処理の散らばりを防ぎます
-- いきなり全面移植せず、hybrid 段階を挟みながら安全に移行します
-
 ## レビュー
 
 ### 修正必須点
@@ -668,3 +660,35 @@ AppError
 実装へ進んで問題ありません。相棒、いい設計だよw
 
 レビュワー: Claude Code
+
+## 実装反映メモ (2026-03-26)
+
+- `main.py` は引数解析と `bootstrap.run()` 呼び出しだけに寄せて、入口専用の薄い構成へ整理した
+- `app/errors.py` / `app/exit_codes.py` / `app/context.py` を追加し、共通定義を `main.py` から外へ出した
+- `auth` 層として `app/auth/oauth_service.py` と `app/auth/token_store.py` を追加し、OAuth 通信と `token.json` 読み書きを分離した
+- `menu` 層として `controller.py` / `input_reader.py` / `renderer.py` / `models.py` を追加し、上下カーソルメニューを `main.py` から切り離した
+- `actions` 層として `ActionDefinition`、`registry.to_menu_items()`、`registry.execute()`、`print_access_token_action()` を追加した
+- `clients/freee_api_client.py` を追加し、今後の API 追加で使う最小の HTTP クライアント土台を用意した
+- 既存機能は維持し、`--auth-code` フロー / `token.json` リフレッシュ / 認可 URL 再案内 / post-token メニューをそのまま通るようにした
+- 終了コードは既存どおり `0 / 1 / 2 / 130` を維持した
+
+## 設計以上に実装で決めたこと
+
+- 今回は既存の動作維持を優先して、`print_access_token` アクションを `debug_only=True` にしつつ、`bootstrap` では `debug_mode=True` 固定で `AppContext` を組み立てた
+- つまり設計上は `DEBUG_MODE=1` のような出し分け余地を残しつつ、現実装では「これまで見えていたメニューが急に消えない」ことを優先している
+- `FreeeApiClient` はまだ実運用アクションからは未使用だけど、今後の API 追加時に `requests` 直書きを増やさないための土台として先に入れた
+- 実行環境の `python3` が 3.9 系だったので、型アノテーションはランタイム互換を崩さないよう文字列アノテーションで書いている
+
+## オーナー向け要約
+
+- `main.py` を薄くし、認証・トークン保存・メニュー・アクション実行を `app/` 配下へ分離した
+- メニュー追加の入口は `ActionDefinition` と `registry` に寄せたので、今後はアクション追加と登録で拡張しやすい
+- `menu` と `action` の境界は `MenuItem` / `ActionDefinition` で分離し、責務が混ざらない形にした
+- 既存の OAuth フロー、`token.json` 更新、認可 URL 再表示、post-token メニュー、終了コード方針は維持した
+- 将来 API を増やすための `FreeeApiClient` 土台も追加したので、次の機能は `requests` 直書きなしで進めやすい
+
+## オーナーへのメッセージ
+
+設計どおりの責務分離までは実装へ反映済みです。  
+次に機能を足すときは、`app/actions/` に新しいアクションを 1 個追加して、`app/actions/registry.py` へ登録する流れで進められます。  
+今の残課題は、`debug_only` の表示条件を本当に環境変数連動へ切り替えるかどうかと、実 API アクションを最初の 1 本どこから入れるか、の 2 点です。
