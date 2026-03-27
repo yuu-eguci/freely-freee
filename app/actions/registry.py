@@ -11,12 +11,12 @@ from app.menu.models import MenuItem
 ACTIONS: tuple[ActionDefinition, ...] = (
     ActionDefinition(
         action_id="bulk_attendance",
-        menu_label="指定の月に勤怠を詰め込む",
+        menu_label="指定の月に自分の勤怠を詰め込む",
         handler=bulk_attendance_handler,
     ),
     ActionDefinition(
         action_id="bulk_attendance_reset",
-        menu_label="指定の月の勤怠をリセットする",
+        menu_label="指定の月の自分の勤怠をリセットする",
         handler=bulk_attendance_reset_handler,
     ),
     ActionDefinition(
