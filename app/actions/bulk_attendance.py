@@ -46,6 +46,11 @@ def handler(context: AppContext) -> int:
         return EXIT_CODE_MENU_ERROR
     year, month = result
 
+    work_hours = _parse_work_hours()
+    if work_hours is None:
+        return EXIT_CODE_MENU_ERROR
+    work_start_minutes, work_end_minutes = work_hours
+
     hr_client = HrApiClient(context.api_client)
     company_id, employee_id = _resolve_user_ids(hr_client)
     attendance_tag_id = _resolve_attendance_tag_id(hr_client, employee_id, company_id)
@@ -65,6 +70,8 @@ def handler(context: AppContext) -> int:
             attendance_tag_id,
             date,
             paid_holidays_by_date.get(date, []),
+            work_start_minutes,
+            work_end_minutes,
         )
         if proc_result == "success":
             success_count += 1
@@ -95,6 +102,46 @@ def _parse_target_month() -> "tuple[int, int] | None":
         print(f"[エラー] 存在しない年月です: {raw!r}")
         return None
     return dt.year, dt.month
+
+
+def _parse_work_hours() -> "tuple[int, int] | None":
+    default_start_hour = BULK_ATTENDANCE_WORK_START_MINUTES // 60
+    default_end_hour = BULK_ATTENDANCE_WORK_END_MINUTES // 60
+
+    start_raw = input(
+        f"出勤何時にする？ ( 0-23 の整数。Enter で {default_start_hour} ): "
+    ).strip()
+    end_raw = input(
+        f"退勤何時にする？ ( 0-23 の整数。Enter で {default_end_hour} ): "
+    ).strip()
+
+    start_hour = _parse_hour_input(start_raw, "出勤", default_start_hour)
+    if start_hour is None:
+        return None
+    end_hour = _parse_hour_input(end_raw, "退勤", default_end_hour)
+    if end_hour is None:
+        return None
+
+    if start_hour >= end_hour:
+        print(
+            "[エラー] 出勤時刻は退勤時刻より前にしてね "
+            f"( start={start_hour:02d}, end={end_hour:02d} )"
+        )
+        return None
+    return start_hour * 60, end_hour * 60
+
+
+def _parse_hour_input(raw: str, label: str, default_hour: int) -> "int | None":
+    if not raw:
+        return default_hour
+    if not re.fullmatch(r"\d{1,2}", raw):
+        print(f"[エラー] {label}時刻は 0-23 の整数で入力してね: {raw!r}")
+        return None
+    hour = int(raw)
+    if not (0 <= hour <= 23):
+        print(f"[エラー] {label}時刻は 0-23 の整数で入力してね: {raw!r}")
+        return None
+    return hour
 
 
 def _resolve_user_ids(hr_client: HrApiClient) -> "tuple[int, int]":
@@ -230,6 +277,8 @@ def _process_date(
     attendance_tag_id: int,
     date: str,
     paid_holidays_for_date: "list[dict[str, Any]]",
+    work_start_minutes: int,
+    work_end_minutes: int,
 ) -> _PROCESS_RESULT:
     """1 日分の勤怠登録 + タグ付与を行い、 'success' / 'skipped' / 'error' を返します。"""
 
@@ -249,18 +298,29 @@ def _process_date(
         )
         return "skipped"
 
-    decision = _decide_paid_holiday(date, paid_holidays_for_date)
+    decision = _decide_paid_holiday(
+        date,
+        paid_holidays_for_date,
+        work_start_minutes,
+        work_end_minutes,
+    )
     if decision.kind == "half_fallback":
         _print_half_fallback(date, decision)
 
-    work_payload = _build_work_record_payload(company_id, date, decision)
+    work_payload = _build_work_record_payload(
+        company_id,
+        date,
+        decision,
+        work_start_minutes,
+        work_end_minutes,
+    )
     try:
         hr_client.put_work_record(employee_id, date, work_payload)
     except ApiResponseError as exc:
         _print_api_error(date, "put_work_record", exc)
         return "error"
 
-    work_label = _work_result_label(decision)
+    work_label = _work_result_label(decision, work_start_minutes, work_end_minutes)
 
     if decision.kind == "full":
         print(f"[OK]   {date} {work_label} 勤怠登録済み (出社タグなし)")
@@ -278,7 +338,12 @@ def _process_date(
     return "success"
 
 
-def _decide_paid_holiday(date: str, paid_holidays_for_date: "list[dict[str, Any]]") -> _PaidHolidayDecision:
+def _decide_paid_holiday(
+    date: str,
+    paid_holidays_for_date: "list[dict[str, Any]]",
+    work_start_minutes: int,
+    work_end_minutes: int,
+) -> _PaidHolidayDecision:
     supported_requests = _filter_supported_paid_holidays(date, paid_holidays_for_date)
     if not supported_requests:
         return _PaidHolidayDecision(kind="none")
@@ -299,7 +364,7 @@ def _decide_paid_holiday(date: str, paid_holidays_for_date: "list[dict[str, Any]
     if not half_requests:
         return _PaidHolidayDecision(kind="none")
 
-    return _build_half_decision(half_requests[0])
+    return _build_half_decision(half_requests[0], work_start_minutes, work_end_minutes)
 
 
 def _filter_supported_paid_holidays(
@@ -362,7 +427,11 @@ def _full_priority(item: "dict[str, Any]") -> "tuple[int, int]":
     return issue_date_value, item_id
 
 
-def _build_half_decision(item: "dict[str, Any]") -> _PaidHolidayDecision:
+def _build_half_decision(
+    item: "dict[str, Any]",
+    work_start_minutes: int,
+    work_end_minutes: int,
+) -> _PaidHolidayDecision:
     request_id = _as_int(item.get("id"))
     start_at = item.get("start_at")
     end_at = item.get("end_at")
@@ -391,20 +460,17 @@ def _build_half_decision(item: "dict[str, Any]") -> _PaidHolidayDecision:
             end_at=end_at,
             reason="invalid_half_range",
         )
-    if (
-        start_minutes < BULK_ATTENDANCE_WORK_START_MINUTES
-        or end_minutes > BULK_ATTENDANCE_WORK_END_MINUTES
-    ):
+    if start_minutes < work_start_minutes or end_minutes > work_end_minutes:
         return _half_fallback_decision(
             request_id=request_id,
             start_at=start_at,
             end_at=end_at,
-            reason="outside_default_work_range",
+            reason="outside_work_range",
         )
 
     is_center_split = (
-        start_minutes > BULK_ATTENDANCE_WORK_START_MINUTES
-        and end_minutes < BULK_ATTENDANCE_WORK_END_MINUTES
+        start_minutes > work_start_minutes
+        and end_minutes < work_end_minutes
         and start_minutes < end_minutes
     )
     if is_center_split:
@@ -415,14 +481,14 @@ def _build_half_decision(item: "dict[str, Any]") -> _PaidHolidayDecision:
             reason="center_split",
         )
 
-    if start_minutes == BULK_ATTENDANCE_WORK_START_MINUTES:
-        paid_minutes = end_minutes - BULK_ATTENDANCE_WORK_START_MINUTES
-        work_start_minutes = end_minutes
-        work_end_minutes = BULK_ATTENDANCE_WORK_END_MINUTES
-    elif end_minutes == BULK_ATTENDANCE_WORK_END_MINUTES:
-        paid_minutes = BULK_ATTENDANCE_WORK_END_MINUTES - start_minutes
-        work_start_minutes = BULK_ATTENDANCE_WORK_START_MINUTES
-        work_end_minutes = start_minutes
+    if start_minutes == work_start_minutes:
+        paid_minutes = end_minutes - work_start_minutes
+        decision_work_start_minutes = end_minutes
+        decision_work_end_minutes = work_end_minutes
+    elif end_minutes == work_end_minutes:
+        paid_minutes = work_end_minutes - start_minutes
+        decision_work_start_minutes = work_start_minutes
+        decision_work_end_minutes = start_minutes
     else:
         return _half_fallback_decision(
             request_id=request_id,
@@ -431,7 +497,7 @@ def _build_half_decision(item: "dict[str, Any]") -> _PaidHolidayDecision:
             reason="edge_not_aligned",
         )
 
-    if work_start_minutes >= work_end_minutes or paid_minutes <= 0:
+    if decision_work_start_minutes >= decision_work_end_minutes or paid_minutes <= 0:
         return _half_fallback_decision(
             request_id=request_id,
             start_at=start_at,
@@ -444,8 +510,8 @@ def _build_half_decision(item: "dict[str, Any]") -> _PaidHolidayDecision:
         request_id=request_id,
         half_start_at=start_at,
         half_end_at=end_at,
-        work_start_minutes=work_start_minutes,
-        work_end_minutes=work_end_minutes,
+        work_start_minutes=decision_work_start_minutes,
+        work_end_minutes=decision_work_end_minutes,
         paid_minutes=paid_minutes,
     )
 
@@ -481,7 +547,18 @@ def _print_half_fallback(date: str, decision: _PaidHolidayDecision) -> None:
     print(f"[WARN] {date} reason=half_fallback detail={detail}")
 
 
-def _build_work_record_payload(company_id: int, date: str, decision: _PaidHolidayDecision) -> dict[str, Any]:
+def _build_work_record_payload(
+    company_id: int,
+    date: str,
+    decision: _PaidHolidayDecision,
+    work_start_minutes: int,
+    work_end_minutes: int,
+) -> dict[str, Any]:
+    if work_start_minutes >= work_end_minutes:
+        raise ActionExecutionError(
+            "就業時刻の範囲が不正です。start は end より前である必要があります。"
+        )
+
     if decision.kind == "full":
         return _build_full_paid_holiday_payload(company_id)
     if decision.kind == "half":
@@ -498,22 +575,49 @@ def _build_work_record_payload(company_id: int, date: str, decision: _PaidHolida
             work_end_minutes=decision.work_end_minutes,
             paid_minutes=decision.paid_minutes,
         )
-    return _build_default_work_record_payload(company_id, date)
+    return _build_default_work_record_payload(
+        company_id,
+        date,
+        work_start_minutes,
+        work_end_minutes,
+    )
 
 
-def _build_default_work_record_payload(company_id: int, date: str) -> dict[str, Any]:
-    return {
-        "company_id": company_id,
-        "break_records": [
+def _build_default_work_record_payload(
+    company_id: int,
+    date: str,
+    work_start_minutes: int,
+    work_end_minutes: int,
+) -> dict[str, Any]:
+    break_start_minutes = _parse_hhmm_to_minutes(BULK_ATTENDANCE_BREAK_START_TIME[:5])
+    break_end_minutes = _parse_hhmm_to_minutes(BULK_ATTENDANCE_BREAK_END_TIME[:5])
+    if break_start_minutes is None or break_end_minutes is None:
+        raise ActionExecutionError("休憩時刻の定数が不正です。")
+
+    has_break = (
+        work_start_minutes <= break_start_minutes and work_end_minutes >= break_end_minutes
+    )
+    break_records: list[dict[str, str]] = []
+    if has_break:
+        break_records = [
             {
                 "clock_in_at": f"{date} {BULK_ATTENDANCE_BREAK_START_TIME}",
                 "clock_out_at": f"{date} {BULK_ATTENDANCE_BREAK_END_TIME}",
             }
-        ],
+        ]
+    else:
+        print(
+            f"[INFO] {date} reason=break_records_skipped "
+            f"detail=work={_minutes_to_hhmm(work_start_minutes)}-{_minutes_to_hhmm(work_end_minutes)}"
+        )
+
+    return {
+        "company_id": company_id,
+        "break_records": break_records,
         "work_record_segments": [
             {
-                "clock_in_at": f"{date} {_minutes_to_hhmmss(BULK_ATTENDANCE_WORK_START_MINUTES)}",
-                "clock_out_at": f"{date} {_minutes_to_hhmmss(BULK_ATTENDANCE_WORK_END_MINUTES)}",
+                "clock_in_at": f"{date} {_minutes_to_hhmmss(work_start_minutes)}",
+                "clock_out_at": f"{date} {_minutes_to_hhmmss(work_end_minutes)}",
             }
         ],
     }
@@ -555,7 +659,11 @@ def _build_half_paid_holiday_payload(
     }
 
 
-def _work_result_label(decision: _PaidHolidayDecision) -> str:
+def _work_result_label(
+    decision: _PaidHolidayDecision,
+    work_start_minutes: int,
+    work_end_minutes: int,
+) -> str:
     if decision.kind == "full":
         return "有給(full)"
     if decision.kind == "half":
@@ -565,11 +673,11 @@ def _work_result_label(decision: _PaidHolidayDecision) -> str:
         end_at = _minutes_to_hhmm(decision.work_end_minutes)
         return f"半休(勤務 {start_at}-{end_at})"
     if decision.kind == "half_fallback":
-        start_at = _minutes_to_hhmm(BULK_ATTENDANCE_WORK_START_MINUTES)
-        end_at = _minutes_to_hhmm(BULK_ATTENDANCE_WORK_END_MINUTES)
+        start_at = _minutes_to_hhmm(work_start_minutes)
+        end_at = _minutes_to_hhmm(work_end_minutes)
         return f"{start_at}-{end_at}(half_fallback)"
-    start_at = _minutes_to_hhmm(BULK_ATTENDANCE_WORK_START_MINUTES)
-    end_at = _minutes_to_hhmm(BULK_ATTENDANCE_WORK_END_MINUTES)
+    start_at = _minutes_to_hhmm(work_start_minutes)
+    end_at = _minutes_to_hhmm(work_end_minutes)
     return f"{start_at}-{end_at}"
 
 
