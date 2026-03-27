@@ -1,5 +1,7 @@
 """Application level error definitions."""
 
+from typing import Any
+
 
 class AppError(Exception):
     """Base exception for application level errors."""
@@ -59,6 +61,10 @@ class ApiConnectionError(ApiClientError):
 
 class ApiResponseError(ApiClientError):
     """Raised when an API response is invalid or unsuccessful."""
+
+    def __init__(self, message: str, *, response_body: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.response_body = response_body
 
 
 class ApiAuthenticationError(ApiClientError):

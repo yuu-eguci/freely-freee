@@ -1,12 +1,18 @@
 """Registry for menu actions."""
 
 from app.actions.base import ActionDefinition
+from app.actions.bulk_attendance import handler as bulk_attendance_handler
 from app.actions.print_access_token import print_access_token_action
 from app.context import AppContext
 from app.errors import ActionRegistrationError, UnknownActionError
 from app.menu.models import MenuItem
 
 ACTIONS: tuple[ActionDefinition, ...] = (
+    ActionDefinition(
+        action_id="bulk_attendance",
+        menu_label="指定の月の平日に勤怠を詰め込む",
+        handler=bulk_attendance_handler,
+    ),
     ActionDefinition(
         action_id="print_access_token",
         menu_label="あ、いや、アクセストークン取得までいけるか見たかっただけ",
