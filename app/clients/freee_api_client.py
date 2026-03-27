@@ -37,6 +37,11 @@ class FreeeApiClient:
 
         return self._request("POST", path, json=json_body)
 
+    def put(self, path: str, *, json_body: "dict[str, Any] | None" = None) -> ApiResponse:
+        """PUT リクエストを実行します。"""
+
+        return self._request("PUT", path, json=json_body)
+
     def _request(self, method: str, path: str, **kwargs: Any) -> ApiResponse:
         url = f"{BASE_URL}{path}"
         headers = {
@@ -63,8 +68,16 @@ class FreeeApiClient:
                 f"API authentication failed (status={response.status_code}): {method} {path}"
             )
         if response.status_code >= 400:
+            error_body: "dict[str, Any] | None" = None
+            try:
+                parsed = response.json()
+                if isinstance(parsed, dict):
+                    error_body = parsed
+            except ValueError:
+                pass
             raise ApiResponseError(
-                f"API request failed (status={response.status_code}): {method} {path}"
+                f"API request failed (status={response.status_code}): {method} {path}",
+                response_body=error_body,
             )
 
         body = _parse_response_body(response)

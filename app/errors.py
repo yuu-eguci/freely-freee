@@ -60,6 +60,10 @@ class ApiConnectionError(ApiClientError):
 class ApiResponseError(ApiClientError):
     """Raised when an API response is invalid or unsuccessful."""
 
+    def __init__(self, message: str, *, response_body: "dict[str, Any] | None" = None) -> None:
+        super().__init__(message)
+        self.response_body = response_body
+
 
 class ApiAuthenticationError(ApiClientError):
     """Raised when an API request is rejected due to authentication."""
