@@ -12,6 +12,12 @@
 ### 1. 今の実装で `use_default_work_pattern` を参照してる箇所
 - 相棒、参照してるのは `app/actions/bulk_attendance.py` の `_process_date` だけだよ。
 - 具体的には `get_work_record` の `body` から `day_pattern` と `use_default_work_pattern` を取り出してる。
+- 取り出しは次のブロックでやってるから、ここも削除対象として扱うよ。
+```python
+use_default_work_pattern = (
+    body.get("use_default_work_pattern") if isinstance(body, dict) else None
+)
+```
 - そのあと条件分岐が 2 段ある。
     - `day_pattern != "normal_day"` のときは `skipped` にしてる。
     - `use_default_work_pattern is not True` のときも `skipped` にしてる。
@@ -22,15 +28,43 @@
 - `use_default_work_pattern` の読み取り自体を削除する。
 - `day_pattern` が `normal_day` なら、そのまま有給判定 -> 勤怠登録 -> 必要ならタグ付与まで進める。
 - `day_pattern` が `normal_day` 以外なら、今までどおり `skipped` にする。
+- 実装イメージがすぐ伝わるように、構造の差分を先に置いておくね。
+```python
+# Before
+day_pattern = body.get("day_pattern") if isinstance(body, dict) else None
+use_default_work_pattern = (
+    body.get("use_default_work_pattern") if isinstance(body, dict) else None
+)
+if day_pattern != "normal_day":
+    print(... reason=day_pattern_not_normal_day ...)
+    return "skipped"
+if use_default_work_pattern is not True:
+    print(... reason=use_default_work_pattern_false ...)
+    return "skipped"
+decision = _decide_paid_holiday(...)
+
+# After
+day_pattern = body.get("day_pattern") if isinstance(body, dict) else None
+if day_pattern != "normal_day":
+    print(... reason=day_pattern_not_normal_day ...)
+    return "skipped"
+decision = _decide_paid_holiday(...)
+```
 
 ### 3. 影響範囲 ( テスト込み )
 - コード参照の影響範囲は `app/actions/bulk_attendance.py` の `_process_date` のみ。
 - `grep` で見た限り、`use_default_work_pattern` を直接参照してるのはここだけで、他モジュールには波及しない。
 - テストの直接影響は `tests/test_bulk_attendance_paid_holidays.py`。
     - 既存の `Fake` client は `use_default_work_pattern=True` を返してるだけなので、判定削除後も既存テストの主目的 ( 有給 full / half の挙動 ) は維持される。
-    - ただし回帰防止のため、設計としては `_process_date` 向けに次の観点を追加する想定。
-        - `day_pattern="normal_day"` かつ `use_default_work_pattern=False` でも `success` になること。
-        - `day_pattern` が `normal_day` 以外なら、`use_default_work_pattern` の値に関係なく `skipped` になること。
+    - ただし回帰防止のため、 `BulkAttendancePaidHolidayTests` に `_process_date` 向けの新規テストケースを追加する。
+        - 追加先は `tests/test_bulk_attendance_paid_holidays.py`。
+        - `test_process_date_normal_day_ignores_use_default_work_pattern_false`
+            - `get_work_record` が `day_pattern="normal_day"` と `use_default_work_pattern=False` を返しても、結果が `success` になることを確認する。
+            - 既存どおり `put_work_record` が 1 回、 `put_attendance_tags` が 1 回呼ばれることも確認する。
+        - `test_process_date_non_normal_day_skips_regardless_of_use_default_work_pattern`
+            - `day_pattern` は `holiday` と `legal_holiday` を使って `subTest` で回す。
+            - `use_default_work_pattern` は `True` / `False` の両方で回す。
+            - どの組み合わせでも結果が `skipped`、かつ `put_work_record` / `put_attendance_tags` が 0 回のままなことを確認する。
 
 ## レビュー
 
@@ -129,3 +163,13 @@ use_default_work_pattern = (
 - 変数 `use_default_work_pattern` の読み取り (244-246行目) も削除対象として明記する
 
 これらを追加したら、あたしは LGTM 出すよ♡
+
+#### レビュー対応内容
+
+- 指摘1は妥当だから、現状の変更対象特定を維持したよ。
+- 指摘2は妥当だから、詳細設計 3 の表現を「想定」から「新規テストケースを追加する」に変えたよ。
+- 指摘3は妥当だから、追加先ファイルとテストケース名、確認観点 ( result と API 呼び出し回数 ) を具体化したよ。
+- 指摘4は妥当だから、 `reason=use_default_work_pattern_false` の `SKIP` ログ削除を疑似コードで明示したよ。
+- 指摘5は妥当だから、詳細設計 2 に Before / After の疑似コードを追加したよ。
+- 指摘6は妥当だから、 `body.get("use_default_work_pattern")` の読み取りブロックを削除対象として明記したよ。
+- 指摘7は妥当で既存記載が成立してるから、影響範囲の調査結果はそのまま維持したよ。
