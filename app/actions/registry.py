@@ -16,7 +16,7 @@ ACTIONS: tuple[ActionDefinition, ...] = (
     ),
     ActionDefinition(
         action_id="bulk_attendance_reset",
-        menu_label="指定月の平日勤怠をリセットする",
+        menu_label="指定月の勤怠をリセットする",
         handler=bulk_attendance_reset_handler,
     ),
     ActionDefinition(

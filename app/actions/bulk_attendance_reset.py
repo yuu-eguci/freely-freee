@@ -1,4 +1,4 @@
-"""指定月の平日勤怠を一括でリセットするアクションです。"""
+"""指定月の勤怠を一括でリセットするアクションです。"""
 
 import calendar
 import re
@@ -12,11 +12,11 @@ from app.context import AppContext
 from app.errors import ActionExecutionError, ApiResponseError
 from app.exit_codes import EXIT_CODE_APP_ERROR, EXIT_CODE_MENU_ERROR, EXIT_CODE_OK
 
-_PROCESS_RESULT = Literal["success", "skipped", "error"]
+_PROCESS_RESULT = Literal["success", "error"]
 
 
 def handler(context: AppContext) -> int:
-    """指定月の平日勤怠を一括でリセットします。"""
+    """指定月の勤怠を一括でリセットします。"""
 
     result = _parse_target_month()
     if result is None:
@@ -30,19 +30,16 @@ def handler(context: AppContext) -> int:
     print(f"\n対象月: {year:04d}-{month:02d} ({len(dates)}日間)\n")
 
     success_count = 0
-    skip_count = 0
     for date in dates:
         proc_result = _process_date(hr_client, employee_id, company_id, date)
         if proc_result == "success":
             success_count += 1
-        elif proc_result == "skipped":
-            skip_count += 1
         elif proc_result == "error":
-            _print_summary(success_count, skip_count, error_date=date)
+            _print_summary(success_count, error_date=date)
             return EXIT_CODE_APP_ERROR
         time.sleep(BULK_ATTENDANCE_API_WAIT_SECONDS)
 
-    _print_summary(success_count, skip_count)
+    _print_summary(success_count)
     return EXIT_CODE_OK
 
 
@@ -101,32 +98,6 @@ def _process_date(
 ) -> _PROCESS_RESULT:
     """1 日分の勤怠リセット + タグリセットを行い、結果を返します。"""
 
-    try:
-        resp = hr_client.get_work_record(employee_id, date, company_id)
-    except ApiResponseError as exc:
-        _print_api_error(date, "勤怠レコード取得失敗", exc)
-        return "error"
-
-    body = resp.body
-    day_pattern = body.get("day_pattern") if isinstance(body, dict) else None
-    use_default_work_pattern = (
-        body.get("use_default_work_pattern") if isinstance(body, dict) else None
-    )
-
-    if day_pattern != "normal_day":
-        print(
-            f"[SKIP] {date} reason=day_pattern_not_normal_day "
-            f"detail=day_pattern={_to_log_value(day_pattern)}"
-        )
-        return "skipped"
-
-    if use_default_work_pattern is not True:
-        print(
-            f"[SKIP] {date} reason=use_default_work_pattern_false "
-            f"detail=use_default_work_pattern={_to_log_value(use_default_work_pattern)}"
-        )
-        return "skipped"
-
     work_payload = _build_work_record_reset_payload(company_id)
     try:
         hr_client.put_work_record(employee_id, date, work_payload)
@@ -165,16 +136,6 @@ def _build_attendance_tag_reset_payload(company_id: int) -> dict:
     }
 
 
-def _to_log_value(value: object) -> str:
-    """ログ向けに値を文字列へ整形します。"""
-
-    if isinstance(value, bool):
-        return str(value).lower()
-    if value is None:
-        return "null"
-    return str(value)
-
-
 def _print_api_error(date: str, prefix: "str | None", exc: ApiResponseError) -> None:
     """API エラーのログを出力します。"""
 
@@ -192,18 +153,11 @@ def _print_api_error(date: str, prefix: "str | None", exc: ApiResponseError) -> 
         print(f"[ERR]  {date} {detail}")
 
 
-def _print_summary(
-    success_count: int,
-    skip_count: int,
-    error_date: "str | None" = None,
-) -> None:
+def _print_summary(success_count: int, error_date: "str | None" = None) -> None:
     """処理結果のサマリーを出力します。"""
 
     error_count = 1 if error_date else 0
     if error_date:
-        print(
-            f"\n中断: {success_count}日成功 / {skip_count}日スキップ / {error_count}日エラー"
-            f" ({error_date} で中断)"
-        )
+        print(f"\n中断: {success_count}日成功 / {error_count}日エラー ({error_date} で中断)")
     else:
-        print(f"\n完了: {success_count}日成功 / {skip_count}日スキップ / {error_count}日エラー")
+        print(f"\n完了: {success_count}日成功 / {error_count}日エラー")
