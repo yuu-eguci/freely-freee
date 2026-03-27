@@ -6,6 +6,7 @@ from app.actions.bulk_attendance import (
     _build_half_decision,
     _decide_paid_holiday,
     _fetch_paid_holidays_for_month,
+    _process_date,
 )
 from app.clients.freee_api_client import ApiResponse
 from app.errors import ActionExecutionError
@@ -35,6 +36,34 @@ class _FakeHrApiClient:
             }
         )
         return self._responses.pop(0)
+
+
+class _FakeHrApiClientForProcessDate:
+    def __init__(self) -> None:
+        self.put_work_record_calls: list[dict] = []
+        self.put_attendance_tags_calls: list[dict] = []
+
+    def get_work_record(self, employee_id: int, date: str, company_id: int) -> ApiResponse:
+        return ApiResponse(
+            status_code=200,
+            headers={},
+            body={
+                "day_pattern": "normal_day",
+                "use_default_work_pattern": True,
+            },
+        )
+
+    def put_work_record(self, employee_id: int, date: str, body: dict) -> ApiResponse:
+        self.put_work_record_calls.append(
+            {"employee_id": employee_id, "date": date, "body": body}
+        )
+        return ApiResponse(status_code=200, headers={}, body={})
+
+    def put_attendance_tags(self, employee_id: int, date: str, body: dict) -> ApiResponse:
+        self.put_attendance_tags_calls.append(
+            {"employee_id": employee_id, "date": date, "body": body}
+        )
+        return ApiResponse(status_code=200, headers={}, body={})
 
 
 class BulkAttendancePaidHolidayTests(unittest.TestCase):
@@ -135,6 +164,55 @@ class BulkAttendancePaidHolidayTests(unittest.TestCase):
             )
 
         self.assertEqual([0, 100], [call["offset"] for call in fake_client.calls])
+
+    def test_process_date_full_paid_holiday_skips_attendance_tag(self) -> None:
+        fake_client = _FakeHrApiClientForProcessDate()
+
+        result = _process_date(
+            fake_client,
+            employee_id=100,
+            company_id=200,
+            attendance_tag_id=300,
+            date="2026-03-10",
+            paid_holidays_for_date=[
+                {
+                    "id": 21,
+                    "holiday_type": "full",
+                    "status": "approved",
+                    "revoke_status": None,
+                    "issue_date": "2026-03-01",
+                }
+            ],
+        )
+
+        self.assertEqual("success", result)
+        self.assertEqual(1, len(fake_client.put_work_record_calls))
+        self.assertEqual(0, len(fake_client.put_attendance_tags_calls))
+
+    def test_process_date_half_paid_holiday_keeps_attendance_tag(self) -> None:
+        fake_client = _FakeHrApiClientForProcessDate()
+
+        result = _process_date(
+            fake_client,
+            employee_id=100,
+            company_id=200,
+            attendance_tag_id=300,
+            date="2026-03-11",
+            paid_holidays_for_date=[
+                {
+                    "id": 22,
+                    "holiday_type": "half",
+                    "status": "approved",
+                    "revoke_status": None,
+                    "start_at": "09:00",
+                    "end_at": "14:00",
+                }
+            ],
+        )
+
+        self.assertEqual("success", result)
+        self.assertEqual(1, len(fake_client.put_work_record_calls))
+        self.assertEqual(1, len(fake_client.put_attendance_tags_calls))
 
 
 if __name__ == "__main__":
