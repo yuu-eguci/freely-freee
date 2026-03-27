@@ -241,21 +241,11 @@ def _process_date(
 
     body = resp.body
     day_pattern = body.get("day_pattern") if isinstance(body, dict) else None
-    use_default_work_pattern = (
-        body.get("use_default_work_pattern") if isinstance(body, dict) else None
-    )
 
     if day_pattern != "normal_day":
         print(
             f"[SKIP] {date} reason=day_pattern_not_normal_day "
             f"detail=day_pattern={_to_log_value(day_pattern)}"
-        )
-        return "skipped"
-
-    if use_default_work_pattern is not True:
-        print(
-            f"[SKIP] {date} reason=use_default_work_pattern_false "
-            f"detail=use_default_work_pattern={_to_log_value(use_default_work_pattern)}"
         )
         return "skipped"
 

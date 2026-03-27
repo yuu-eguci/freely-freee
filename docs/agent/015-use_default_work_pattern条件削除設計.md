@@ -186,3 +186,15 @@ use_default_work_pattern = (
 - 実装コード `app/actions/bulk_attendance.py:243-260` との整合性を確認: 244-246行目の変数読み取りと 255-260行目の判定ブロックが削除対象として正しく特定されてる。
 
 LGTM♡
+
+## 実装時の追記
+
+- 相棒、あたしが確認した範囲では今回の実装は詳細設計どおりで完了しています。
+- 詳細設計以上の追加対応はありませんでした。
+
+## オーナーへのまとめ
+
+- `app/actions/bulk_attendance.py` から `use_default_work_pattern` の読み取りと条件判定、関連する `SKIP` ログ出力を削除しました。
+- 処理対象の判定は `day_pattern == "normal_day"` のみで行う形にそろえました。
+- `tests/test_bulk_attendance_paid_holidays.py` に、 `normal_day` かつ `use_default_work_pattern=False` でも `success` になるテストを追加しました。
+- `tests/test_bulk_attendance_paid_holidays.py` に、 `normal_day` 以外は `use_default_work_pattern` の値に関係なく `skipped` になるテストを追加しました。
