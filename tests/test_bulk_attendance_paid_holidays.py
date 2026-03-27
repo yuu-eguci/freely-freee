@@ -8,6 +8,10 @@ from app.actions.bulk_attendance import (
     _fetch_paid_holidays_for_month,
     _process_date,
 )
+from app.actions.bulk_attendance_common import (
+    BULK_ATTENDANCE_WORK_END_MINUTES,
+    BULK_ATTENDANCE_WORK_START_MINUTES,
+)
 from app.clients.freee_api_client import ApiResponse
 from app.errors import ActionExecutionError
 
@@ -80,13 +84,31 @@ class BulkAttendancePaidHolidayTests(unittest.TestCase):
                 "id": 1,
                 "start_at": "09:00",
                 "end_at": "14:00",
-            }
+            },
+            BULK_ATTENDANCE_WORK_START_MINUTES,
+            BULK_ATTENDANCE_WORK_END_MINUTES,
         )
 
         self.assertEqual("half", decision.kind)
         self.assertEqual(14 * 60, decision.work_start_minutes)
-        self.assertEqual(19 * 60, decision.work_end_minutes)
+        self.assertEqual(BULK_ATTENDANCE_WORK_END_MINUTES, decision.work_end_minutes)
         self.assertEqual(300, decision.paid_minutes)
+
+    def test_build_half_decision_with_custom_work_hours(self) -> None:
+        decision = _build_half_decision(
+            {
+                "id": 101,
+                "start_at": "08:00",
+                "end_at": "12:00",
+            },
+            8 * 60,
+            17 * 60,
+        )
+
+        self.assertEqual("half", decision.kind)
+        self.assertEqual(12 * 60, decision.work_start_minutes)
+        self.assertEqual(17 * 60, decision.work_end_minutes)
+        self.assertEqual(240, decision.paid_minutes)
 
     def test_build_half_decision_center_split_fallback(self) -> None:
         decision = _build_half_decision(
@@ -94,7 +116,9 @@ class BulkAttendancePaidHolidayTests(unittest.TestCase):
                 "id": 2,
                 "start_at": "10:00",
                 "end_at": "15:00",
-            }
+            },
+            BULK_ATTENDANCE_WORK_START_MINUTES,
+            BULK_ATTENDANCE_WORK_END_MINUTES,
         )
 
         self.assertEqual("half_fallback", decision.kind)
@@ -112,6 +136,8 @@ class BulkAttendancePaidHolidayTests(unittest.TestCase):
                     "revoke_status": None,
                 }
             ],
+            BULK_ATTENDANCE_WORK_START_MINUTES,
+            BULK_ATTENDANCE_WORK_END_MINUTES,
         )
 
         self.assertEqual("none", decision.kind)
@@ -135,6 +161,8 @@ class BulkAttendancePaidHolidayTests(unittest.TestCase):
                     "issue_date": "2026-03-03",
                 },
             ],
+            BULK_ATTENDANCE_WORK_START_MINUTES,
+            BULK_ATTENDANCE_WORK_END_MINUTES,
         )
 
         self.assertEqual("full", decision.kind)
@@ -190,6 +218,8 @@ class BulkAttendancePaidHolidayTests(unittest.TestCase):
                     "issue_date": "2026-03-01",
                 }
             ],
+            work_start_minutes=BULK_ATTENDANCE_WORK_START_MINUTES,
+            work_end_minutes=BULK_ATTENDANCE_WORK_END_MINUTES,
         )
 
         self.assertEqual("success", result)
@@ -215,6 +245,8 @@ class BulkAttendancePaidHolidayTests(unittest.TestCase):
                     "end_at": "14:00",
                 }
             ],
+            work_start_minutes=BULK_ATTENDANCE_WORK_START_MINUTES,
+            work_end_minutes=BULK_ATTENDANCE_WORK_END_MINUTES,
         )
 
         self.assertEqual("success", result)
@@ -234,11 +266,33 @@ class BulkAttendancePaidHolidayTests(unittest.TestCase):
             attendance_tag_id=300,
             date="2026-03-12",
             paid_holidays_for_date=[],
+            work_start_minutes=BULK_ATTENDANCE_WORK_START_MINUTES,
+            work_end_minutes=BULK_ATTENDANCE_WORK_END_MINUTES,
         )
 
         self.assertEqual("success", result)
         self.assertEqual(1, len(fake_client.put_work_record_calls))
         self.assertEqual(1, len(fake_client.put_attendance_tags_calls))
+        payload = fake_client.put_work_record_calls[0]["body"]
+        self.assertEqual(1, len(payload["break_records"]))
+
+    def test_process_date_custom_hours_without_lunch_window_omits_break_records(self) -> None:
+        fake_client = _FakeHrApiClientForProcessDate()
+
+        result = _process_date(
+            fake_client,
+            employee_id=100,
+            company_id=200,
+            attendance_tag_id=300,
+            date="2026-03-14",
+            paid_holidays_for_date=[],
+            work_start_minutes=13 * 60,
+            work_end_minutes=18 * 60,
+        )
+
+        self.assertEqual("success", result)
+        payload = fake_client.put_work_record_calls[0]["body"]
+        self.assertEqual([], payload["break_records"])
 
     def test_process_date_non_normal_day_skips_regardless_of_use_default_work_pattern(self) -> None:
         for day_pattern in ("holiday", "legal_holiday"):
@@ -259,6 +313,8 @@ class BulkAttendancePaidHolidayTests(unittest.TestCase):
                         attendance_tag_id=300,
                         date="2026-03-13",
                         paid_holidays_for_date=[],
+                        work_start_minutes=BULK_ATTENDANCE_WORK_START_MINUTES,
+                        work_end_minutes=BULK_ATTENDANCE_WORK_END_MINUTES,
                     )
 
                     self.assertEqual("skipped", result)
