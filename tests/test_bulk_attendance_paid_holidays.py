@@ -39,7 +39,14 @@ class _FakeHrApiClient:
 
 
 class _FakeHrApiClientForProcessDate:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        day_pattern: str = "normal_day",
+        use_default_work_pattern: bool = True,
+    ) -> None:
+        self.day_pattern = day_pattern
+        self.use_default_work_pattern = use_default_work_pattern
         self.put_work_record_calls: list[dict] = []
         self.put_attendance_tags_calls: list[dict] = []
 
@@ -48,8 +55,8 @@ class _FakeHrApiClientForProcessDate:
             status_code=200,
             headers={},
             body={
-                "day_pattern": "normal_day",
-                "use_default_work_pattern": True,
+                "day_pattern": self.day_pattern,
+                "use_default_work_pattern": self.use_default_work_pattern,
             },
         )
 
@@ -213,6 +220,50 @@ class BulkAttendancePaidHolidayTests(unittest.TestCase):
         self.assertEqual("success", result)
         self.assertEqual(1, len(fake_client.put_work_record_calls))
         self.assertEqual(1, len(fake_client.put_attendance_tags_calls))
+
+    def test_process_date_normal_day_ignores_use_default_work_pattern_false(self) -> None:
+        fake_client = _FakeHrApiClientForProcessDate(
+            day_pattern="normal_day",
+            use_default_work_pattern=False,
+        )
+
+        result = _process_date(
+            fake_client,
+            employee_id=100,
+            company_id=200,
+            attendance_tag_id=300,
+            date="2026-03-12",
+            paid_holidays_for_date=[],
+        )
+
+        self.assertEqual("success", result)
+        self.assertEqual(1, len(fake_client.put_work_record_calls))
+        self.assertEqual(1, len(fake_client.put_attendance_tags_calls))
+
+    def test_process_date_non_normal_day_skips_regardless_of_use_default_work_pattern(self) -> None:
+        for day_pattern in ("holiday", "legal_holiday"):
+            for use_default_work_pattern in (True, False):
+                with self.subTest(
+                    day_pattern=day_pattern,
+                    use_default_work_pattern=use_default_work_pattern,
+                ):
+                    fake_client = _FakeHrApiClientForProcessDate(
+                        day_pattern=day_pattern,
+                        use_default_work_pattern=use_default_work_pattern,
+                    )
+
+                    result = _process_date(
+                        fake_client,
+                        employee_id=100,
+                        company_id=200,
+                        attendance_tag_id=300,
+                        date="2026-03-13",
+                        paid_holidays_for_date=[],
+                    )
+
+                    self.assertEqual("skipped", result)
+                    self.assertEqual(0, len(fake_client.put_work_record_calls))
+                    self.assertEqual(0, len(fake_client.put_attendance_tags_calls))
 
 
 if __name__ == "__main__":
