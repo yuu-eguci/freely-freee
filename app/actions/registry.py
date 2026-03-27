@@ -2,6 +2,7 @@
 
 from app.actions.base import ActionDefinition
 from app.actions.bulk_attendance import handler as bulk_attendance_handler
+from app.actions.bulk_attendance_reset import handler as bulk_attendance_reset_handler
 from app.actions.print_access_token import print_access_token_action
 from app.context import AppContext
 from app.errors import ActionRegistrationError, UnknownActionError
@@ -12,6 +13,11 @@ ACTIONS: tuple[ActionDefinition, ...] = (
         action_id="bulk_attendance",
         menu_label="指定の月の平日に勤怠を詰め込む",
         handler=bulk_attendance_handler,
+    ),
+    ActionDefinition(
+        action_id="bulk_attendance_reset",
+        menu_label="指定月の平日勤怠をリセットする",
+        handler=bulk_attendance_reset_handler,
     ),
     ActionDefinition(
         action_id="print_access_token",
