@@ -34,6 +34,28 @@ class HrApiClient:
             params={"company_id": company_id},
         )
 
+    def get_paid_holidays(
+        self,
+        company_id: int,
+        *,
+        start_target_date: str,
+        end_target_date: str,
+        limit: int,
+        offset: int,
+    ) -> ApiResponse:
+        """指定期間の有給申請一覧を取得します。"""
+
+        return self._client.get(
+            f"{self.HR_BASE}/approval_requests/paid_holidays",
+            params={
+                "company_id": company_id,
+                "start_target_date": start_target_date,
+                "end_target_date": end_target_date,
+                "limit": limit,
+                "offset": offset,
+            },
+        )
+
     def put_work_record(self, employee_id: int, date: str, body: "dict[str, Any]") -> ApiResponse:
         """指定日の勤怠レコードを更新します。"""
 
