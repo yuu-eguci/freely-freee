@@ -68,7 +68,7 @@ class FreeeApiClient:
                 f"API authentication failed (status={response.status_code}): {method} {path}"
             )
         if response.status_code >= 400:
-            error_body: "dict[str, Any] | None" = None
+            error_body: dict[str, Any] | None = None
             try:
                 parsed = response.json()
                 if isinstance(parsed, dict):

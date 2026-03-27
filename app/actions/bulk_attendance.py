@@ -207,16 +207,13 @@ def _build_attendance_tag_payload(company_id: int, attendance_tag_id: int) -> di
 def _print_api_error(date: str, prefix: "str | None", exc: ApiResponseError) -> None:
     """API エラーのログを出力します。"""
 
-    messages: "list[str]" = []
+    messages: list[str] = []
     body = exc.response_body
     if isinstance(body, dict):
         for err in body.get("errors", []):
             messages.extend(err.get("messages", []))
 
-    if messages:
-        detail = " / ".join(messages)
-    else:
-        detail = str(exc)
+    detail = " / ".join(messages) if messages else str(exc)
 
     if prefix:
         print(f"[ERR]  {date} {prefix}: {detail}")
