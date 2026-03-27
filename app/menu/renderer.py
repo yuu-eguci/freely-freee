@@ -12,6 +12,13 @@ def _write_menu_line(*, selected: bool, label: str) -> None:
     sys.stdout.write(f"\r{prefix} {label}\x1b[K\n")
 
 
+def normalize_after_menu_exit() -> None:
+    """Normalize cursor position after leaving the interactive menu."""
+
+    sys.stdout.write("\r\x1b[K")
+    sys.stdout.flush()
+
+
 def render_menu(items: list[MenuItem], selected_index: int, *, initial: bool) -> None:
     """Render the interactive menu to stdout."""
 
