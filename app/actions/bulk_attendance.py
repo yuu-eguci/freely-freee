@@ -1,4 +1,4 @@
-"""指定月の平日に一括で勤怠を登録するアクションです。"""
+"""指定の月の平日に一括で勤怠を登録するアクションです。"""
 
 import calendar
 import re
@@ -39,7 +39,7 @@ class _PaidHolidayDecision:
 
 
 def handler(context: AppContext) -> int:
-    """指定月の平日に一括で勤怠を登録します。"""
+    """指定の月の平日に一括で勤怠を登録します。"""
 
     result = _parse_target_month()
     if result is None:
