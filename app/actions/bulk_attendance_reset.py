@@ -1,4 +1,4 @@
-"""指定月の勤怠を一括でリセットするアクションです。"""
+"""指定の月の勤怠を一括でリセットするアクションです。"""
 
 import calendar
 import re
@@ -16,7 +16,7 @@ _PROCESS_RESULT = Literal["success", "error"]
 
 
 def handler(context: AppContext) -> int:
-    """指定月の勤怠を一括でリセットします。"""
+    """指定の月の勤怠を一括でリセットします。"""
 
     result = _parse_target_month()
     if result is None:
