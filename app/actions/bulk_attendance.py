@@ -141,13 +141,27 @@ def _process_date(
 
     body = resp.body
     day_pattern = body.get("day_pattern") if isinstance(body, dict) else None
+    use_default_work_pattern = (
+        body.get("use_default_work_pattern") if isinstance(body, dict) else None
+    )
 
-    # 6b. normal_day でなければスキップ
+    # 6b. day_pattern が normal_day でなければスキップ
     if day_pattern != "normal_day":
-        print(f"[SKIP] {date} ({day_pattern})")
+        print(
+            f"[SKIP] {date} reason=day_pattern_not_normal_day "
+            f"detail=day_pattern={_to_log_value(day_pattern)}"
+        )
         return "skipped"
 
-    # 6c. 勤怠レコード更新
+    # 6c. use_default_work_pattern が true でなければスキップ
+    if use_default_work_pattern is not True:
+        print(
+            f"[SKIP] {date} reason=use_default_work_pattern_false "
+            f"detail=use_default_work_pattern={_to_log_value(use_default_work_pattern)}"
+        )
+        return "skipped"
+
+    # 6d. 勤怠レコード更新
     work_payload = _build_work_record_payload(company_id, date)
     try:
         hr_client.put_work_record(employee_id, date, work_payload)
@@ -155,7 +169,7 @@ def _process_date(
         _print_api_error(date, None, exc)
         return "error"
 
-    # 6e. 勤怠タグ更新
+    # 6f. 勤怠タグ更新
     tag_payload = _build_attendance_tag_payload(company_id, attendance_tag_id)
     try:
         hr_client.put_attendance_tags(employee_id, date, tag_payload)
@@ -165,9 +179,19 @@ def _process_date(
         _print_api_error(date, "タグ付与失敗", exc)
         return "error"
 
-    # 6g. 成功ログ
+    # 6h. 成功ログ
     print(f"[OK]   {date} 09:00-19:00 出社タグ付与済み")
     return "success"
+
+
+def _to_log_value(value: object) -> str:
+    """ログ向けに値を文字列へ整形します。"""
+
+    if isinstance(value, bool):
+        return str(value).lower()
+    if value is None:
+        return "null"
+    return str(value)
 
 
 def _build_work_record_payload(company_id: int, date: str) -> dict:
