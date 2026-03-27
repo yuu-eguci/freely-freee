@@ -270,8 +270,13 @@ def _process_date(
         _print_api_error(date, "put_work_record", exc)
         return "error"
 
-    tag_payload = _build_attendance_tag_payload(company_id, attendance_tag_id)
     work_label = _work_result_label(decision)
+
+    if decision.kind == "full":
+        print(f"[OK]   {date} {work_label} 勤怠登録済み (出社タグなし)")
+        return "success"
+
+    tag_payload = _build_attendance_tag_payload(company_id, attendance_tag_id)
     try:
         hr_client.put_attendance_tags(employee_id, date, tag_payload)
     except ApiResponseError as exc:
