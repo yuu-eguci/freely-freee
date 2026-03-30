@@ -8,6 +8,7 @@ from app.actions.bulk_attendance import (
     _decide_paid_holiday,
     _fetch_paid_holidays_for_month,
     _parse_employee_id,
+    _parse_include_attendance_tag,
     _process_date,
     _resolve_ids_by_input_employee_id,
 )
@@ -120,6 +121,30 @@ class BulkAttendancePaidHolidayTests(unittest.TestCase):
             employee_id = _parse_employee_id()
 
         self.assertIsNone(employee_id)
+
+    def test_parse_include_attendance_tag_defaults_false_on_enter(self) -> None:
+        with patch("builtins.input", return_value=""):
+            include_attendance_tag = _parse_include_attendance_tag()
+
+        self.assertFalse(include_attendance_tag)
+
+    def test_parse_include_attendance_tag_accepts_yes(self) -> None:
+        with patch("builtins.input", return_value="yes"):
+            include_attendance_tag = _parse_include_attendance_tag()
+
+        self.assertTrue(include_attendance_tag)
+
+    def test_parse_include_attendance_tag_accepts_no(self) -> None:
+        with patch("builtins.input", return_value="n"):
+            include_attendance_tag = _parse_include_attendance_tag()
+
+        self.assertFalse(include_attendance_tag)
+
+    def test_parse_include_attendance_tag_rejects_invalid(self) -> None:
+        with patch("builtins.input", return_value="maybe"):
+            include_attendance_tag = _parse_include_attendance_tag()
+
+        self.assertIsNone(include_attendance_tag)
 
     def test_resolve_ids_by_input_employee_id_uses_company_id_from_users_me(self) -> None:
         fake_client = _FakeHrApiClientForCurrentUser(
@@ -281,6 +306,7 @@ class BulkAttendancePaidHolidayTests(unittest.TestCase):
             ],
             work_start_minutes=BULK_ATTENDANCE_WORK_START_MINUTES,
             work_end_minutes=BULK_ATTENDANCE_WORK_END_MINUTES,
+            include_attendance_tag=True,
         )
 
         self.assertEqual("success", result)
@@ -308,6 +334,7 @@ class BulkAttendancePaidHolidayTests(unittest.TestCase):
             ],
             work_start_minutes=BULK_ATTENDANCE_WORK_START_MINUTES,
             work_end_minutes=BULK_ATTENDANCE_WORK_END_MINUTES,
+            include_attendance_tag=True,
         )
 
         self.assertEqual("success", result)
@@ -329,6 +356,7 @@ class BulkAttendancePaidHolidayTests(unittest.TestCase):
             paid_holidays_for_date=[],
             work_start_minutes=BULK_ATTENDANCE_WORK_START_MINUTES,
             work_end_minutes=BULK_ATTENDANCE_WORK_END_MINUTES,
+            include_attendance_tag=True,
         )
 
         self.assertEqual("success", result)
@@ -349,6 +377,7 @@ class BulkAttendancePaidHolidayTests(unittest.TestCase):
             paid_holidays_for_date=[],
             work_start_minutes=13 * 60,
             work_end_minutes=18 * 60,
+            include_attendance_tag=True,
         )
 
         self.assertEqual("success", result)
@@ -376,11 +405,31 @@ class BulkAttendancePaidHolidayTests(unittest.TestCase):
                         paid_holidays_for_date=[],
                         work_start_minutes=BULK_ATTENDANCE_WORK_START_MINUTES,
                         work_end_minutes=BULK_ATTENDANCE_WORK_END_MINUTES,
+                        include_attendance_tag=True,
                     )
 
                     self.assertEqual("skipped", result)
                     self.assertEqual(0, len(fake_client.put_work_record_calls))
                     self.assertEqual(0, len(fake_client.put_attendance_tags_calls))
+
+    def test_process_date_skips_attendance_tag_when_disabled(self) -> None:
+        fake_client = _FakeHrApiClientForProcessDate()
+
+        result = _process_date(
+            fake_client,
+            employee_id=100,
+            company_id=200,
+            attendance_tag_id=300,
+            date="2026-03-15",
+            paid_holidays_for_date=[],
+            work_start_minutes=BULK_ATTENDANCE_WORK_START_MINUTES,
+            work_end_minutes=BULK_ATTENDANCE_WORK_END_MINUTES,
+            include_attendance_tag=False,
+        )
+
+        self.assertEqual("success", result)
+        self.assertEqual(1, len(fake_client.put_work_record_calls))
+        self.assertEqual(0, len(fake_client.put_attendance_tags_calls))
 
 
 if __name__ == "__main__":
