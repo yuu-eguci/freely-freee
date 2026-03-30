@@ -3,6 +3,7 @@
 .DS_Store
 !.gitkeep
 db/
+logs/
 .env
 staging.env
 token.json
