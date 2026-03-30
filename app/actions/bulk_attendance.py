@@ -52,6 +52,46 @@ def handler_by_employee_id(context: AppContext) -> int:
     return _run_bulk_attendance(context, target_ids_resolver=_resolve_ids_by_input_employee_id)
 
 
+def run_by_employee_id_for_web(
+    context: AppContext,
+    *,
+    target_month: str,
+    start_hour: int,
+    end_hour: int,
+    employee_id: int,
+    include_attendance_tag: bool,
+) -> int:
+    """Web フォーム入力で従業員ID指定の月次一括勤怠を実行します。"""
+
+    month_result = _parse_target_month_value(target_month)
+    if month_result is None:
+        return EXIT_CODE_MENU_ERROR
+    year, month = month_result
+
+    work_hours = _validate_work_hours(start_hour, end_hour)
+    if work_hours is None:
+        return EXIT_CODE_MENU_ERROR
+    work_start_minutes, work_end_minutes = work_hours
+
+    if employee_id < 1:
+        print(f"[エラー] 従業員IDは 1 以上の整数で入力してね: {employee_id!r}")
+        return EXIT_CODE_MENU_ERROR
+
+    hr_client = HrApiClient(context.api_client)
+    company_id = _resolve_company_id(hr_client)
+
+    return _execute_bulk_attendance(
+        hr_client=hr_client,
+        company_id=company_id,
+        employee_id=employee_id,
+        year=year,
+        month=month,
+        work_start_minutes=work_start_minutes,
+        work_end_minutes=work_end_minutes,
+        include_attendance_tag=include_attendance_tag,
+    )
+
+
 def _run_bulk_attendance(context: AppContext, *, target_ids_resolver: _TARGET_IDS_RESOLVER) -> int:
     result = _parse_target_month()
     if result is None:
@@ -136,6 +176,12 @@ def _parse_target_month() -> "tuple[int, int] | None":
     """input() で yyyy-mm を受け取り、(year, month) を返します。不正入力時は None を返します。"""
 
     raw = input("対象月を入力してね (yyyy-mm): ").strip()
+    return _parse_target_month_value(raw)
+
+
+def _parse_target_month_value(raw: str) -> "tuple[int, int] | None":
+    """yyyy-mm 形式の文字列を (year, month) へ変換します。"""
+
     if not raw:
         print("[エラー] 入力が空です。")
         return None
@@ -168,6 +214,10 @@ def _parse_work_hours() -> "tuple[int, int] | None":
     if end_hour is None:
         return None
 
+    return _validate_work_hours(start_hour, end_hour)
+
+
+def _validate_work_hours(start_hour: int, end_hour: int) -> "tuple[int, int] | None":
     if start_hour >= end_hour:
         print(
             "[エラー] 出勤時刻は退勤時刻より前にしてね "
