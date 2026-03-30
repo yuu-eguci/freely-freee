@@ -63,6 +63,10 @@ def _run_bulk_attendance(context: AppContext, *, target_ids_resolver: _TARGET_ID
         return EXIT_CODE_MENU_ERROR
     work_start_minutes, work_end_minutes = work_hours
 
+    include_attendance_tag = _parse_include_attendance_tag()
+    if include_attendance_tag is None:
+        return EXIT_CODE_MENU_ERROR
+
     hr_client = HrApiClient(context.api_client)
     target_ids = target_ids_resolver(hr_client)
     if target_ids is None:
@@ -77,6 +81,7 @@ def _run_bulk_attendance(context: AppContext, *, target_ids_resolver: _TARGET_ID
         month=month,
         work_start_minutes=work_start_minutes,
         work_end_minutes=work_end_minutes,
+        include_attendance_tag=include_attendance_tag,
     )
 
 
@@ -89,8 +94,11 @@ def _execute_bulk_attendance(
     month: int,
     work_start_minutes: int,
     work_end_minutes: int,
+    include_attendance_tag: bool,
 ) -> int:
-    attendance_tag_id = _resolve_attendance_tag_id(hr_client, employee_id, company_id)
+    attendance_tag_id: int | None = None
+    if include_attendance_tag:
+        attendance_tag_id = _resolve_attendance_tag_id(hr_client, employee_id, company_id)
 
     paid_holidays_by_date = _load_paid_holidays_by_date(hr_client, company_id, year, month)
 
@@ -109,6 +117,7 @@ def _execute_bulk_attendance(
             paid_holidays_by_date.get(date, []),
             work_start_minutes,
             work_end_minutes,
+            include_attendance_tag,
         )
         if proc_result == "success":
             success_count += 1
@@ -179,6 +188,18 @@ def _parse_hour_input(raw: str, label: str, default_hour: int) -> "int | None":
         print(f"[エラー] {label}時刻は 0-23 の整数で入力してね: {raw!r}")
         return None
     return hour
+
+
+def _parse_include_attendance_tag() -> "bool | None":
+    raw = input("出社タグいる? (y/N. Enter でつけない): ").strip().lower()
+    if not raw:
+        return False
+    if raw in {"y", "yes"}:
+        return True
+    if raw in {"n", "no"}:
+        return False
+    print(f"[エラー] 出社タグの指定は y か n (Enter でつけない) で入力してね: {raw!r}")
+    return None
 
 
 def _resolve_user_ids(hr_client: HrApiClient) -> "tuple[int, int]":
@@ -352,11 +373,12 @@ def _process_date(
     hr_client: HrApiClient,
     employee_id: int,
     company_id: int,
-    attendance_tag_id: int,
+    attendance_tag_id: "int | None",
     date: str,
     paid_holidays_for_date: "list[dict[str, Any]]",
     work_start_minutes: int,
     work_end_minutes: int,
+    include_attendance_tag: bool,
 ) -> _PROCESS_RESULT:
     """1 日分の勤怠登録 + タグ付与を行い、 'success' / 'skipped' / 'error' を返します。"""
 
@@ -403,6 +425,13 @@ def _process_date(
     if decision.kind == "full":
         print(f"[OK]   {date} {work_label} 勤怠登録済み (出社タグなし)")
         return "success"
+
+    if not include_attendance_tag:
+        print(f"[OK]   {date} {work_label} 勤怠登録済み (出社タグなし)")
+        return "success"
+
+    if attendance_tag_id is None:
+        raise ActionExecutionError("出社タグ付与が有効なのに attendance_tag_id が未設定です。")
 
     tag_payload = _build_attendance_tag_payload(company_id, attendance_tag_id)
     try:
