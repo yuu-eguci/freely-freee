@@ -195,3 +195,12 @@
 ## レビュー (再)
 
 全指摘事項が適切に設計書へ反映されている。未解決の項目なし。LGTM。
+
+## オーナー向け要約（実装）
+
+- `main.py` で `stdout/stderr` を `TeeStream` に差し替え、Terminal とログファイルへ同時出力する実装を追加した。
+- ログは `logs/YYYYMMDD/freee-cli_YYYYMMDD_HHMMSS_pid<id>.log` へ `utf-8` で保存し、`[RUN START] / [RUN END] / [EXIT CODE]` を記録するようにした。
+- 実行終了時に `ログ保存先` と `この .log ファイルをそのまま送ってね` を表示し、ログ回収導線を追加した（ログ作成失敗時は代替メッセージ）。
+- `app/logging/tee_logger.py` を新規追加し、ログ書込失敗時は `[LOG WARNING]` を1回だけ出して Terminal 出力を継続する挙動にした。
+- 30日より古い `logs/YYYYMMDD` ディレクトリを起動時に best effort で削除する処理を追加した。
+- `tests/test_main_logging.py` を追加し、同時出力・終了コード・Ctrl+C・ログ作成失敗・保持処理・TeeStream失敗時継続を検証した。
