@@ -1,17 +1,21 @@
 """bulk_attendance の有給判定ロジックを検証するテストです。"""
 
 import unittest
+from unittest.mock import patch
 
 from app.actions.bulk_attendance import (
     _build_half_decision,
     _decide_paid_holiday,
     _fetch_paid_holidays_for_month,
+    _parse_employee_id,
     _process_date,
+    _resolve_ids_by_input_employee_id,
 )
 from app.actions.bulk_attendance_common import (
     BULK_ATTENDANCE_WORK_END_MINUTES,
     BULK_ATTENDANCE_WORK_START_MINUTES,
 )
+from app.actions.registry import ACTIONS
 from app.clients.freee_api_client import ApiResponse
 from app.errors import ActionExecutionError
 
@@ -40,6 +44,16 @@ class _FakeHrApiClient:
             }
         )
         return self._responses.pop(0)
+
+
+class _FakeHrApiClientForCurrentUser:
+    def __init__(self, body: dict) -> None:
+        self.body = body
+        self.call_count = 0
+
+    def get_current_user(self) -> ApiResponse:
+        self.call_count += 1
+        return ApiResponse(status_code=200, headers={}, body=self.body)
 
 
 class _FakeHrApiClientForProcessDate:
@@ -78,6 +92,53 @@ class _FakeHrApiClientForProcessDate:
 
 
 class BulkAttendancePaidHolidayTests(unittest.TestCase):
+    def test_registry_contains_bulk_attendance_by_employee_id(self) -> None:
+        matched = [action for action in ACTIONS if action.action_id == "bulk_attendance_by_employee_id"]
+        self.assertEqual(1, len(matched))
+        self.assertEqual("指定の月に従業員ID指定で勤怠を詰め込む", matched[0].menu_label)
+
+    def test_parse_employee_id_accepts_positive_integer(self) -> None:
+        with patch("builtins.input", return_value="123"):
+            employee_id = _parse_employee_id()
+
+        self.assertEqual(123, employee_id)
+
+    def test_parse_employee_id_rejects_empty(self) -> None:
+        with patch("builtins.input", return_value=""):
+            employee_id = _parse_employee_id()
+
+        self.assertIsNone(employee_id)
+
+    def test_parse_employee_id_rejects_non_digit(self) -> None:
+        with patch("builtins.input", return_value="abc"):
+            employee_id = _parse_employee_id()
+
+        self.assertIsNone(employee_id)
+
+    def test_parse_employee_id_rejects_zero(self) -> None:
+        with patch("builtins.input", return_value="0"):
+            employee_id = _parse_employee_id()
+
+        self.assertIsNone(employee_id)
+
+    def test_resolve_ids_by_input_employee_id_uses_company_id_from_users_me(self) -> None:
+        fake_client = _FakeHrApiClientForCurrentUser(
+            body={
+                "companies": [
+                    {
+                        "id": 987,
+                        "employee_id": 9999,
+                    }
+                ]
+            }
+        )
+
+        with patch("builtins.input", return_value="123"):
+            resolved = _resolve_ids_by_input_employee_id(fake_client)
+
+        self.assertEqual((987, 123), resolved)
+        self.assertEqual(1, fake_client.call_count)
+
     def test_build_half_decision_morning_half(self) -> None:
         decision = _build_half_decision(
             {
