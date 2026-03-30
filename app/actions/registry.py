@@ -1,7 +1,12 @@
 """Registry for menu actions."""
 
 from app.actions.base import ActionDefinition
-from app.actions.bulk_attendance import handler as bulk_attendance_handler
+from app.actions.bulk_attendance import (
+    handler as bulk_attendance_handler,
+)
+from app.actions.bulk_attendance import (
+    handler_by_employee_id as bulk_attendance_by_employee_id_handler,
+)
 from app.actions.bulk_attendance_reset import handler as bulk_attendance_reset_handler
 from app.actions.print_access_token import print_access_token_action
 from app.context import AppContext
@@ -13,6 +18,11 @@ ACTIONS: tuple[ActionDefinition, ...] = (
         action_id="bulk_attendance",
         menu_label="指定の月に自分の勤怠を詰め込む",
         handler=bulk_attendance_handler,
+    ),
+    ActionDefinition(
+        action_id="bulk_attendance_by_employee_id",
+        menu_label="指定の月に従業員ID指定で勤怠を詰め込む",
+        handler=bulk_attendance_by_employee_id_handler,
     ),
     ActionDefinition(
         action_id="bulk_attendance_reset",
