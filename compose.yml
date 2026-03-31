@@ -13,6 +13,8 @@ services:
       # 仮想環境をプロジェクト直下 (/app/.venv) に作ります。
       PIPENV_VENV_IN_PROJECT: "1"
     working_dir: /app
+    ports:
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./:/app
       # こっち↑は bind mount.

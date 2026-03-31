@@ -23,4 +23,7 @@ docker compose run --rm app pipenv run python main.py
 # そんでこれを実行する。一度 token.json が出来ちゃえば、次からは AUTH_CODE なしで実行で OK.
 # token.json は90日で expire する。
 docker compose run --rm app pipenv run python main.py --auth-code AUTH_CODE
+
+# Web UI を起動する（http://127.0.0.1:8000）
+docker compose run --rm --service-ports app pipenv run python web.py
 ```
