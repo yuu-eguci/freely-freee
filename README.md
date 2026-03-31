@@ -5,9 +5,58 @@ freely-freee
 
 ![](./docs/image-birds-fly.webp)
 
+## いいとこ
+
+- Docker 内で動作するので、 Python とか不要
+- Docker だけあれば OK
+
+## しょしんしゃむけ つかいかた
+
+Docker を入れる
+
+```bash
+# Mac のひと
+brew install --cask docker
+
+# Windows のひと
+# Windows のことはよくしらんけどこれでインストールできるらしい
+winget install Docker.DockerDesktop
+```
+
+.env ファイルを受け取ってこのファイル (README.md) の隣に置く。
+
+そしたらこれ↓をやる。
+
+```bash
+# 最初のセットアップ
+docker compose up -d --build
+
+# これをコピペして Enter すると
+docker compose run --rm app pipenv run python main.py
+
+# こういうふうに出る↓
+# 認可コードを再取得してください。以下の URL をブラウザで開いてください:
+# https://accounts.secure.freee...._company
+
+# この URL ↑を開いて、 Freee にログインして、自分用の "認可コード" を得る
+# こんな形式↓ (例)
+# MlPebabcdefghijklmnopqrstuvwxyzABCDEFGHeQU8
+
+# 認可コードを使ってこうする↓
+docker compose run --rm app pipenv run python main.py --auth-code MlPebabcdefghijklmnopqrstuvwxyzABCDEFGHeQU8
+
+# するとこう↓なる
+# 認可コードでトークンを取得し、token.json を更新しました。
+# 今回は何をしたい? (↑↓で選択 / Enterで決定 / Ctrl+Cで中断)
+#   指定の月に自分の勤怠を詰め込む
+# > 指定の月に従業員ID指定で勤怠を詰め込む <-- これを選んで、機能を楽しんでください
+#   指定の月の自分の勤怠をリセットする
+#   あ、いや、アクセストークン取得までいけるか見たかっただけ
+```
+
 ![](./docs/image-birds-at-tree.webp)
 
-## Commands
+## ぼく用 Commands
 
 ```bash
 # 最初のセットアップ
