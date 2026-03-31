@@ -9,8 +9,17 @@ freely-freee
 
 - Docker 内で動作するので、 Python とか不要
 - Docker だけあれば OK
+- あっ、でもこのプログラムをダウンロードするのに git あったほうがいい
 
 ## しょしんしゃむけ つかいかた
+
+Git を入れる
+
+```bash
+# Windows のひと
+winget install Git.Git
+git clone https://github.com/yuu-eguci/freely-freee.git
+```
 
 Docker を入れる
 
