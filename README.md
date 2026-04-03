@@ -17,7 +17,8 @@ Git を入れる
 
 ```bash
 # Windows のひと
-winget install Git.Git
+winget install GitHub.GitHubDesktop
+# GitHub Desktop でこれ↓をやる (まったく初心者向けじゃない説明)
 git clone https://github.com/yuu-eguci/freely-freee.git
 ```
 
