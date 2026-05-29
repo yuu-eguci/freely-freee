@@ -7,9 +7,10 @@ from datetime import datetime
 from typing import Literal
 
 from app.actions.bulk_attendance_common import BULK_ATTENDANCE_API_WAIT_SECONDS
+from app.actions.hr_user_context import resolve_current_company_and_employee_id
 from app.clients.hr_api_client import HrApiClient
 from app.context import AppContext
-from app.errors import ActionExecutionError, ApiResponseError
+from app.errors import ApiResponseError
 from app.exit_codes import EXIT_CODE_APP_ERROR, EXIT_CODE_MENU_ERROR, EXIT_CODE_OK
 
 _PROCESS_RESULT = Literal["success", "error"]
@@ -24,7 +25,7 @@ def handler(context: AppContext) -> int:
     year, month = result
 
     hr_client = HrApiClient(context.api_client)
-    company_id, employee_id = _resolve_user_ids(hr_client)
+    company_id, employee_id = resolve_current_company_and_employee_id(hr_client)
 
     dates = _generate_dates(year, month)
     print(f"\n対象月: {year:04d}-{month:02d} ({len(dates)}日間)\n")
@@ -59,28 +60,6 @@ def _parse_target_month() -> "tuple[int, int] | None":
         print(f"[エラー] 存在しない年月です: {raw!r}")
         return None
     return dt.year, dt.month
-
-
-def _resolve_user_ids(hr_client: HrApiClient) -> "tuple[int, int]":
-    """GET /users/me から company_id と employee_id を取得します。"""
-
-    resp = hr_client.get_current_user()
-    body = resp.body
-    if not isinstance(body, dict):
-        raise ActionExecutionError("GET /users/me: 予期しないレスポンス形式です。")
-    companies = body.get("companies", [])
-    if not companies:
-        raise ActionExecutionError("GET /users/me: companies が空です。freee の権限設定を確認してください。")
-    first = companies[0]
-    company_id = first.get("id")
-    employee_id = first.get("employee_id")
-    if company_id is None:
-        raise ActionExecutionError("GET /users/me: company_id が取得できませんでした。")
-    if employee_id is None:
-        raise ActionExecutionError(
-            "GET /users/me: employee_id が取得できませんでした。freee の権限設定を確認してください。"
-        )
-    return int(company_id), int(employee_id)
 
 
 def _generate_dates(year: int, month: int) -> "list[str]":

@@ -16,6 +16,7 @@ from app.actions.bulk_attendance_common import (
     BULK_ATTENDANCE_WORK_END_MINUTES,
     BULK_ATTENDANCE_WORK_START_MINUTES,
 )
+from app.actions.hr_user_context import resolve_current_company_and_employee_id
 from app.clients.hr_api_client import HrApiClient
 from app.context import AppContext
 from app.errors import ActionExecutionError, ApiResponseError
@@ -60,7 +61,7 @@ def _run_bulk_attendance(context: AppContext) -> int:
         return EXIT_CODE_MENU_ERROR
 
     hr_client = HrApiClient(context.api_client)
-    company_id, employee_id = _resolve_user_ids(hr_client)
+    company_id, employee_id = resolve_current_company_and_employee_id(hr_client)
 
     return _execute_bulk_attendance(
         hr_client=hr_client,
@@ -199,35 +200,6 @@ def _parse_include_attendance_tag() -> "bool | None":
         return False
     print(f"[エラー] 出社タグの指定は y か n (Enter でつけない) で入力してね: {raw!r}")
     return None
-
-
-def _resolve_user_ids(hr_client: HrApiClient) -> "tuple[int, int]":
-    """GET /users/me から company_id と employee_id を取得します。"""
-
-    company = _resolve_first_company(hr_client)
-    company_id = company.get("id")
-    employee_id = company.get("employee_id")
-    if company_id is None:
-        raise ActionExecutionError("GET /users/me: company_id が取得できませんでした。")
-    if employee_id is None:
-        raise ActionExecutionError(
-            "GET /users/me: employee_id が取得できませんでした。freee の権限設定を確認してください。"
-        )
-    return int(company_id), int(employee_id)
-
-
-def _resolve_first_company(hr_client: HrApiClient) -> "dict[str, Any]":
-    resp = hr_client.get_current_user()
-    body = resp.body
-    if not isinstance(body, dict):
-        raise ActionExecutionError("GET /users/me: 予期しないレスポンス形式です。")
-    companies = body.get("companies", [])
-    if not companies:
-        raise ActionExecutionError("GET /users/me: companies が空です。freee の権限設定を確認してください。")
-    first = companies[0]
-    if not isinstance(first, dict):
-        raise ActionExecutionError("GET /users/me: companies[0] の形式が不正です。")
-    return first
 
 
 def _resolve_attendance_tag_id(
