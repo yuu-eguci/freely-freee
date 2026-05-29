@@ -25,7 +25,10 @@ def handler(context: AppContext) -> int:
     year, month = result
 
     hr_client = HrApiClient(context.api_client)
-    company_id, employee_id = resolve_current_company_and_employee_id(hr_client)
+    company_id, employee_id = resolve_current_company_and_employee_id(
+        hr_client,
+        target_company_id=context.config.target_company_id,
+    )
 
     dates = _generate_dates(year, month)
     print(f"\n対象月: {year:04d}-{month:02d} ({len(dates)}日間)\n")

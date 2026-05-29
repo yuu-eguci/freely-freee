@@ -13,6 +13,7 @@ class AppConfig:
     client_id: str
     client_secret: str
     redirect_uri: str
+    target_company_id: int
 
 
 def require_env(name: str) -> str:
@@ -27,6 +28,16 @@ def require_env(name: str) -> str:
     return stripped
 
 
+def require_int_env(name: str) -> int:
+    """Read a required integer environment variable."""
+
+    raw_value = require_env(name)
+    try:
+        return int(raw_value)
+    except ValueError as exc:
+        raise ConfigError(f"Environment variable {name} is not a valid integer: {raw_value!r}") from exc
+
+
 def load_config() -> AppConfig:
     """Load application configuration from the environment."""
 
@@ -34,4 +45,5 @@ def load_config() -> AppConfig:
         client_id=require_env("FREEE_CLIENT_ID"),
         client_secret=require_env("FREEE_CLIENT_SECRET"),
         redirect_uri=require_env("FREEE_REDIRECT_URI"),
+        target_company_id=require_int_env("TARGET_COMPANY_ID"),
     )
