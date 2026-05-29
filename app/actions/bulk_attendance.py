@@ -52,46 +52,6 @@ def handler_by_employee_id(context: AppContext) -> int:
     return _run_bulk_attendance(context, target_ids_resolver=_resolve_ids_by_input_employee_id)
 
 
-def run_by_employee_id_for_web(
-    context: AppContext,
-    *,
-    target_month: str,
-    start_hour: int,
-    end_hour: int,
-    employee_id: int,
-    include_attendance_tag: bool,
-) -> int:
-    """Web フォーム入力で従業員ID指定の月次一括勤怠を実行します。"""
-
-    month_result = _parse_target_month_value(target_month)
-    if month_result is None:
-        return EXIT_CODE_MENU_ERROR
-    year, month = month_result
-
-    work_hours = _validate_work_hours(start_hour, end_hour)
-    if work_hours is None:
-        return EXIT_CODE_MENU_ERROR
-    work_start_minutes, work_end_minutes = work_hours
-
-    if employee_id < 1:
-        print(f"[エラー] 従業員IDは 1 以上の整数で入力してね: {employee_id!r}")
-        return EXIT_CODE_MENU_ERROR
-
-    hr_client = HrApiClient(context.api_client)
-    company_id = _resolve_company_id(hr_client)
-
-    return _execute_bulk_attendance(
-        hr_client=hr_client,
-        company_id=company_id,
-        employee_id=employee_id,
-        year=year,
-        month=month,
-        work_start_minutes=work_start_minutes,
-        work_end_minutes=work_end_minutes,
-        include_attendance_tag=include_attendance_tag,
-    )
-
-
 def _run_bulk_attendance(context: AppContext, *, target_ids_resolver: _TARGET_IDS_RESOLVER) -> int:
     result = _parse_target_month()
     if result is None:

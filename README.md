@@ -60,7 +60,6 @@ docker compose run --rm app pipenv run python main.py --auth-code MlPebabcdefghi
 # 認可コードでトークンを取得し、token.json を更新しました。
 # 今回は何をしたい? (↑↓で選択 / Enterで決定 / Ctrl+Cで中断)
 #   指定の月に自分の勤怠を詰め込む
-# > 指定の月に従業員ID指定で勤怠を詰め込む <-- これを選んで、機能を楽しんでください
 #   指定の月の自分の勤怠をリセットする
 #   あ、いや、アクセストークン取得までいけるか見たかっただけ
 ```
@@ -84,6 +83,4 @@ docker compose run --rm app pipenv run python main.py
 # token.json は90日で expire する。
 docker compose run --rm app pipenv run python main.py --auth-code AUTH_CODE
 
-# Web UI を起動する（http://127.0.0.1:8000）
-docker compose run --rm --service-ports app pipenv run python web.py
 ```
