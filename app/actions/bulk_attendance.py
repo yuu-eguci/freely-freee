@@ -3,7 +3,6 @@
 import calendar
 import re
 import time
-from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
@@ -24,7 +23,6 @@ from app.exit_codes import EXIT_CODE_APP_ERROR, EXIT_CODE_MENU_ERROR, EXIT_CODE_
 
 _PROCESS_RESULT = Literal["success", "skipped", "error"]
 _PAID_HOLIDAY_KIND = Literal["none", "full", "half", "half_fallback"]
-_TARGET_IDS_RESOLVER = Callable[[HrApiClient], "tuple[int, int] | None"]
 
 
 @dataclass(frozen=True)
@@ -43,16 +41,10 @@ class _PaidHolidayDecision:
 def handler(context: AppContext) -> int:
     """指定の月の平日に一括で勤怠を登録します。"""
 
-    return _run_bulk_attendance(context, target_ids_resolver=_resolve_user_ids)
+    return _run_bulk_attendance(context)
 
 
-def handler_by_employee_id(context: AppContext) -> int:
-    """指定の月の平日に従業員ID指定で一括勤怠登録します。"""
-
-    return _run_bulk_attendance(context, target_ids_resolver=_resolve_ids_by_input_employee_id)
-
-
-def _run_bulk_attendance(context: AppContext, *, target_ids_resolver: _TARGET_IDS_RESOLVER) -> int:
+def _run_bulk_attendance(context: AppContext) -> int:
     result = _parse_target_month()
     if result is None:
         return EXIT_CODE_MENU_ERROR
@@ -68,10 +60,7 @@ def _run_bulk_attendance(context: AppContext, *, target_ids_resolver: _TARGET_ID
         return EXIT_CODE_MENU_ERROR
 
     hr_client = HrApiClient(context.api_client)
-    target_ids = target_ids_resolver(hr_client)
-    if target_ids is None:
-        return EXIT_CODE_MENU_ERROR
-    company_id, employee_id = target_ids
+    company_id, employee_id = _resolve_user_ids(hr_client)
 
     return _execute_bulk_attendance(
         hr_client=hr_client,
@@ -227,22 +216,6 @@ def _resolve_user_ids(hr_client: HrApiClient) -> "tuple[int, int]":
     return int(company_id), int(employee_id)
 
 
-def _resolve_ids_by_input_employee_id(hr_client: HrApiClient) -> "tuple[int, int] | None":
-    company_id = _resolve_company_id(hr_client)
-    employee_id = _parse_employee_id()
-    if employee_id is None:
-        return None
-    return company_id, employee_id
-
-
-def _resolve_company_id(hr_client: HrApiClient) -> int:
-    company = _resolve_first_company(hr_client)
-    company_id = company.get("id")
-    if company_id is None:
-        raise ActionExecutionError("GET /users/me: company_id が取得できませんでした。")
-    return int(company_id)
-
-
 def _resolve_first_company(hr_client: HrApiClient) -> "dict[str, Any]":
     resp = hr_client.get_current_user()
     body = resp.body
@@ -255,24 +228,6 @@ def _resolve_first_company(hr_client: HrApiClient) -> "dict[str, Any]":
     if not isinstance(first, dict):
         raise ActionExecutionError("GET /users/me: companies[0] の形式が不正です。")
     return first
-
-
-def _parse_employee_id() -> "int | None":
-    raw = input(
-        "対象の従業員IDを入力してね "
-        "(数字のみ。よくわからんかったら Ctrl + C でいったん終わって、やり直してね): "
-    ).strip()
-    if not raw:
-        print("[エラー] 従業員IDは空で入力できないよ")
-        return None
-    if not re.fullmatch(r"\d+", raw):
-        print(f"[エラー] 従業員IDは数字だけで入力してね: {raw!r}")
-        return None
-    employee_id = int(raw)
-    if employee_id < 1:
-        print(f"[エラー] 従業員IDは 1 以上の整数で入力してね: {raw!r}")
-        return None
-    return employee_id
 
 
 def _resolve_attendance_tag_id(
