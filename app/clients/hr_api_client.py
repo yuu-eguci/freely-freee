@@ -38,6 +38,7 @@ class HrApiClient:
         self,
         company_id: int,
         *,
+        applicant_id: int,
         start_target_date: str,
         end_target_date: str,
         limit: int,
@@ -49,6 +50,7 @@ class HrApiClient:
             f"{self.HR_BASE}/approval_requests/paid_holidays",
             params={
                 "company_id": company_id,
+                "applicant_id": applicant_id,
                 "start_target_date": start_target_date,
                 "end_target_date": end_target_date,
                 "limit": limit,

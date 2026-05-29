@@ -27,6 +27,7 @@ class _FakeHrApiClient:
         self,
         company_id: int,
         *,
+        applicant_id: int,
         start_target_date: str,
         end_target_date: str,
         limit: int,
@@ -35,6 +36,7 @@ class _FakeHrApiClient:
         self.calls.append(
             {
                 "company_id": company_id,
+                "applicant_id": applicant_id,
                 "start_target_date": start_target_date,
                 "end_target_date": end_target_date,
                 "limit": limit,
@@ -220,11 +222,13 @@ class BulkAttendancePaidHolidayTests(unittest.TestCase):
             _fetch_paid_holidays_for_month(
                 fake_client,
                 company_id=123,
+                applicant_id=456,
                 start_target_date="2026-03-01",
                 end_target_date="2026-03-31",
             )
 
         self.assertEqual([0, 100], [call["offset"] for call in fake_client.calls])
+        self.assertEqual([456, 456], [call["applicant_id"] for call in fake_client.calls])
 
     def test_process_date_full_paid_holiday_skips_attendance_tag(self) -> None:
         fake_client = _FakeHrApiClientForProcessDate()
