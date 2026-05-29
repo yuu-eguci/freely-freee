@@ -61,7 +61,10 @@ def _run_bulk_attendance(context: AppContext) -> int:
         return EXIT_CODE_MENU_ERROR
 
     hr_client = HrApiClient(context.api_client)
-    company_id, employee_id = resolve_current_company_and_employee_id(hr_client)
+    company_id, employee_id = resolve_current_company_and_employee_id(
+        hr_client,
+        target_company_id=context.config.target_company_id,
+    )
 
     return _execute_bulk_attendance(
         hr_client=hr_client,
