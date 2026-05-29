@@ -3,6 +3,7 @@
 import calendar
 import re
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
@@ -243,6 +244,10 @@ def _load_paid_holidays_by_date(
     month: int,
 ) -> "dict[str, list[dict[str, Any]]]":
     start_date, end_date = _month_date_range(year, month)
+    print(
+        f"[INFO] paid_holidays取得条件 company_id={company_id} applicant_id={applicant_id} "
+        f"range={start_date}..{end_date}"
+    )
     paid_holidays = _fetch_paid_holidays_for_month(
         hr_client,
         company_id=company_id,
@@ -251,11 +256,19 @@ def _load_paid_holidays_by_date(
         end_target_date=end_date,
     )
     by_date: dict[str, list[dict[str, Any]]] = {}
+    invalid_target_date_count = 0
     for paid_holiday in paid_holidays:
         target_date = paid_holiday.get("target_date")
         if not isinstance(target_date, str):
+            invalid_target_date_count += 1
             continue
         by_date.setdefault(target_date, []).append(paid_holiday)
+    valid_count = len(paid_holidays) - invalid_target_date_count
+    print(
+        f"[INFO] paid_holidays取得結果 valid_count={valid_count} "
+        f"invalid_target_date_count={invalid_target_date_count} "
+        f"target_dates={_format_target_date_list(by_date.keys())}"
+    )
     return by_date
 
 
@@ -774,6 +787,13 @@ def _as_int(value: object) -> "int | None":
     if isinstance(value, str) and value.isdigit():
         return int(value)
     return None
+
+
+def _format_target_date_list(target_dates: Iterable[str]) -> str:
+    sorted_dates = sorted(target_dates)
+    if not sorted_dates:
+        return "none"
+    return ",".join(sorted_dates)
 
 
 def _to_log_value(value: object) -> str:
