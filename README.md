@@ -16,9 +16,9 @@ freely-freee
 Git を入れる
 
 ```bash
-# Windows のひと
+# Windows のひと (PowerShell で OK だった)
 winget install GitHub.GitHubDesktop
-# GitHub Desktop でこれ↓をやる (まったく初心者向けじゃない説明)
+# GitHub Desktop でこれ↓をやる (まったく初心者向けじゃない説明) (PowerShell で OK だった)
 git clone https://github.com/yuu-eguci/freely-freee.git
 ```
 
@@ -29,7 +29,7 @@ Docker を入れる
 brew install --cask docker
 
 # Windows のひと
-# Windows のことはよくしらんけどこれでインストールできるらしい
+# Windows のことはよくしらんけどこれでインストールできるらしい (PowerShell で OK だった)
 winget install Docker.DockerDesktop
 ```
 
@@ -38,10 +38,11 @@ winget install Docker.DockerDesktop
 そしたらこれ↓をやる。
 
 ```bash
-# 最初のセットアップ
+# 最初のセットアップ (PowerShell で OK だった)
+# NOTE: Windows で実行するとき、 wsl update を求められるときがありました。
 docker compose up -d --build
 
-# これをコピペして Enter すると
+# これをコピペして Enter すると (PowerShell で OK だった)
 docker compose run --rm app pipenv run python main.py
 
 # こういうふうに出る↓
