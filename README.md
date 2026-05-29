@@ -18,8 +18,10 @@ Git を入れる
 ```bash
 # Windows のひと (PowerShell で OK だった)
 winget install GitHub.GitHubDesktop
-# GitHub Desktop でこれ↓をやる (まったく初心者向けじゃない説明) (PowerShell で OK だった)
+# git でこれ↓をやる (まったく初心者向けじゃない説明) (PowerShell で OK だった)
 git clone https://github.com/yuu-eguci/freely-freee.git
+# なんか更新があったとき↓
+git pull
 ```
 
 Docker を入れる

@@ -16,7 +16,7 @@ from app.actions.bulk_attendance_common import (
     BULK_ATTENDANCE_WORK_END_MINUTES,
     BULK_ATTENDANCE_WORK_START_MINUTES,
 )
-from app.actions.hr_user_context import resolve_current_company_and_employee_id
+from app.actions.hr_user_context import resolve_current_user_context
 from app.clients.hr_api_client import HrApiClient
 from app.context import AppContext
 from app.errors import ActionExecutionError, ApiResponseError
@@ -61,15 +61,16 @@ def _run_bulk_attendance(context: AppContext) -> int:
         return EXIT_CODE_MENU_ERROR
 
     hr_client = HrApiClient(context.api_client)
-    company_id, employee_id = resolve_current_company_and_employee_id(
+    user_context = resolve_current_user_context(
         hr_client,
         target_company_id=context.config.target_company_id,
     )
 
     return _execute_bulk_attendance(
         hr_client=hr_client,
-        company_id=company_id,
-        employee_id=employee_id,
+        company_id=user_context.company_id,
+        employee_id=user_context.employee_id,
+        user_id=user_context.user_id,
         year=year,
         month=month,
         work_start_minutes=work_start_minutes,
@@ -83,6 +84,7 @@ def _execute_bulk_attendance(
     hr_client: HrApiClient,
     company_id: int,
     employee_id: int,
+    user_id: int,
     year: int,
     month: int,
     work_start_minutes: int,
@@ -93,7 +95,7 @@ def _execute_bulk_attendance(
     if include_attendance_tag:
         attendance_tag_id = _resolve_attendance_tag_id(hr_client, employee_id, company_id)
 
-    paid_holidays_by_date = _load_paid_holidays_by_date(hr_client, company_id, year, month)
+    paid_holidays_by_date = _load_paid_holidays_by_date(hr_client, company_id, user_id, year, month)
 
     dates = _generate_dates(year, month)
     print(f"\n対象月: {year:04d}-{month:02d} ({len(dates)}日間)\n")
@@ -236,6 +238,7 @@ def _generate_dates(year: int, month: int) -> "list[str]":
 def _load_paid_holidays_by_date(
     hr_client: HrApiClient,
     company_id: int,
+    applicant_id: int,
     year: int,
     month: int,
 ) -> "dict[str, list[dict[str, Any]]]":
@@ -243,6 +246,7 @@ def _load_paid_holidays_by_date(
     paid_holidays = _fetch_paid_holidays_for_month(
         hr_client,
         company_id=company_id,
+        applicant_id=applicant_id,
         start_target_date=start_date,
         end_target_date=end_date,
     )
@@ -266,6 +270,7 @@ def _fetch_paid_holidays_for_month(
     hr_client: HrApiClient,
     *,
     company_id: int,
+    applicant_id: int,
     start_target_date: str,
     end_target_date: str,
 ) -> "list[dict[str, Any]]":
@@ -276,6 +281,7 @@ def _fetch_paid_holidays_for_month(
     while True:
         resp = hr_client.get_paid_holidays(
             company_id,
+            applicant_id=applicant_id,
             start_target_date=start_target_date,
             end_target_date=end_target_date,
             limit=BULK_ATTENDANCE_PAID_HOLIDAYS_PAGE_LIMIT,
@@ -363,11 +369,11 @@ def _process_date(
     work_label = _work_result_label(decision, work_start_minutes, work_end_minutes)
 
     if decision.kind == "full":
-        print(f"[OK]   {date} {work_label} 勤怠登録済み (出社タグなし)")
+        print(f"[OK]   {date} {work_label} 勤怠登録したよ (出社タグなし)")
         return "success"
 
     if not include_attendance_tag:
-        print(f"[OK]   {date} {work_label} 勤怠登録済み (出社タグなし)")
+        print(f"[OK]   {date} {work_label} 勤怠登録したよ (出社タグなし)")
         return "success"
 
     if attendance_tag_id is None:
@@ -377,11 +383,11 @@ def _process_date(
     try:
         hr_client.put_attendance_tags(employee_id, date, tag_payload)
     except ApiResponseError as exc:
-        print(f"[OK]   {date} {work_label} 勤怠登録済み")
+        print(f"[OK]   {date} {work_label} 勤怠登録したよ")
         _print_api_error(date, "put_attendance_tags", exc)
         return "error"
 
-    print(f"[OK]   {date} {work_label} 出社タグ付与済み")
+    print(f"[OK]   {date} {work_label} 出社タグ付与したよ")
     return "success"
 
 

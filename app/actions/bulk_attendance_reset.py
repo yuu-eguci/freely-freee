@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Literal
 
 from app.actions.bulk_attendance_common import BULK_ATTENDANCE_API_WAIT_SECONDS
-from app.actions.hr_user_context import resolve_current_company_and_employee_id
+from app.actions.hr_user_context import resolve_current_user_context
 from app.clients.hr_api_client import HrApiClient
 from app.context import AppContext
 from app.errors import ApiResponseError
@@ -25,7 +25,7 @@ def handler(context: AppContext) -> int:
     year, month = result
 
     hr_client = HrApiClient(context.api_client)
-    company_id, employee_id = resolve_current_company_and_employee_id(
+    user_context = resolve_current_user_context(
         hr_client,
         target_company_id=context.config.target_company_id,
     )
@@ -35,7 +35,12 @@ def handler(context: AppContext) -> int:
 
     success_count = 0
     for date in dates:
-        proc_result = _process_date(hr_client, employee_id, company_id, date)
+        proc_result = _process_date(
+            hr_client,
+            user_context.employee_id,
+            user_context.company_id,
+            date,
+        )
         if proc_result == "success":
             success_count += 1
         elif proc_result == "error":

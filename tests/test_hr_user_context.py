@@ -2,7 +2,7 @@
 
 import unittest
 
-from app.actions.hr_user_context import resolve_current_company_and_employee_id
+from app.actions.hr_user_context import resolve_current_user_context
 from app.clients.freee_api_client import ApiResponse
 from app.errors import ActionExecutionError
 
@@ -18,9 +18,10 @@ class _FakeHrApiClientForCurrentUser:
 
 
 class HrUserContextTests(unittest.TestCase):
-    def test_resolve_current_company_and_employee_id_uses_target_company(self) -> None:
+    def test_resolve_current_user_context_uses_target_company(self) -> None:
         fake_client = _FakeHrApiClientForCurrentUser(
             body={
+                "id": 12345,
                 "companies": [
                     {
                         "id": 987,
@@ -34,17 +35,20 @@ class HrUserContextTests(unittest.TestCase):
             }
         )
 
-        resolved = resolve_current_company_and_employee_id(
+        resolved = resolve_current_user_context(
             fake_client,
             target_company_id=654,
         )
 
-        self.assertEqual((654, 1111), resolved)
+        self.assertEqual(654, resolved.company_id)
+        self.assertEqual(1111, resolved.employee_id)
+        self.assertEqual(12345, resolved.user_id)
         self.assertEqual(1, fake_client.call_count)
 
-    def test_resolve_current_company_and_employee_id_accepts_string_company_id(self) -> None:
+    def test_resolve_current_user_context_accepts_string_company_id(self) -> None:
         fake_client = _FakeHrApiClientForCurrentUser(
             body={
+                "id": "12345",
                 "companies": [
                     {
                         "id": "654",
@@ -54,17 +58,20 @@ class HrUserContextTests(unittest.TestCase):
             }
         )
 
-        resolved = resolve_current_company_and_employee_id(
+        resolved = resolve_current_user_context(
             fake_client,
             target_company_id=654,
         )
 
-        self.assertEqual((654, 1111), resolved)
+        self.assertEqual(654, resolved.company_id)
+        self.assertEqual(1111, resolved.employee_id)
+        self.assertEqual(12345, resolved.user_id)
         self.assertEqual(1, fake_client.call_count)
 
-    def test_resolve_current_company_and_employee_id_rejects_missing_target_company(self) -> None:
+    def test_resolve_current_user_context_rejects_missing_target_company(self) -> None:
         fake_client = _FakeHrApiClientForCurrentUser(
             body={
+                "id": 12345,
                 "companies": [
                     {
                         "id": 987,
@@ -75,13 +82,60 @@ class HrUserContextTests(unittest.TestCase):
         )
 
         with self.assertRaises(ActionExecutionError) as exc:
-            resolve_current_company_and_employee_id(
+            resolve_current_user_context(
                 fake_client,
                 target_company_id=654,
             )
 
         self.assertEqual(
             "GET /users/me: TARGET_COMPANY_ID=654 に一致する company が見つかりませんでした。",
+            str(exc.exception),
+        )
+
+    def test_resolve_current_user_context_rejects_missing_user_id(self) -> None:
+        fake_client = _FakeHrApiClientForCurrentUser(
+            body={
+                "companies": [
+                    {
+                        "id": 654,
+                        "employee_id": 1111,
+                    }
+                ]
+            }
+        )
+
+        with self.assertRaises(ActionExecutionError) as exc:
+            resolve_current_user_context(
+                fake_client,
+                target_company_id=654,
+            )
+
+        self.assertEqual(
+            "GET /users/me: user_id が取得できませんでした。freee の権限設定を確認してください。",
+            str(exc.exception),
+        )
+
+    def test_resolve_current_user_context_rejects_invalid_employee_id(self) -> None:
+        fake_client = _FakeHrApiClientForCurrentUser(
+            body={
+                "id": 12345,
+                "companies": [
+                    {
+                        "id": 654,
+                        "employee_id": "abc",
+                    }
+                ]
+            }
+        )
+
+        with self.assertRaises(ActionExecutionError) as exc:
+            resolve_current_user_context(
+                fake_client,
+                target_company_id=654,
+            )
+
+        self.assertEqual(
+            "GET /users/me: employee_id が取得できませんでした。freee の権限設定を確認してください。",
             str(exc.exception),
         )
 
