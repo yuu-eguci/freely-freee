@@ -7,6 +7,7 @@ from app.actions.bulk_attendance import (
     _build_half_decision,
     _decide_paid_holiday,
     _fetch_paid_holidays_for_month,
+    _load_paid_holidays_by_date,
     _parse_include_attendance_tag,
     _process_date,
 )
@@ -229,6 +230,88 @@ class BulkAttendancePaidHolidayTests(unittest.TestCase):
 
         self.assertEqual([0, 100], [call["offset"] for call in fake_client.calls])
         self.assertEqual([456, 456], [call["applicant_id"] for call in fake_client.calls])
+
+    def test_load_paid_holidays_by_date_logs_range_and_target_dates(self) -> None:
+        fake_client = _FakeHrApiClient(
+            responses=[
+                ApiResponse(
+                    status_code=200,
+                    headers={},
+                    body={
+                        "paid_holidays": [
+                            {
+                                "id": 1,
+                                "target_date": "2026-03-01",
+                            },
+                            {
+                                "id": 2,
+                                "target_date": "2026-03-15",
+                            },
+                        ],
+                        "total_count": 2,
+                    },
+                )
+            ]
+        )
+
+        with patch("builtins.print") as mock_print:
+            by_date = _load_paid_holidays_by_date(
+                fake_client,
+                company_id=123,
+                applicant_id=456,
+                year=2026,
+                month=3,
+            )
+
+        self.assertEqual({"2026-03-01", "2026-03-15"}, set(by_date))
+        logged_lines = [call.args[0] for call in mock_print.call_args_list]
+        self.assertIn(
+            "[INFO] paid_holidays取得条件 company_id=123 applicant_id=456 range=2026-03-01..2026-03-31",
+            logged_lines,
+        )
+        self.assertIn(
+            "[INFO] paid_holidays取得結果 valid_count=2 invalid_target_date_count=0 target_dates=2026-03-01,2026-03-15",
+            logged_lines,
+        )
+
+    def test_load_paid_holidays_by_date_logs_invalid_target_date_count(self) -> None:
+        fake_client = _FakeHrApiClient(
+            responses=[
+                ApiResponse(
+                    status_code=200,
+                    headers={},
+                    body={
+                        "paid_holidays": [
+                            {
+                                "id": 1,
+                                "target_date": "2026-03-01",
+                            },
+                            {
+                                "id": 2,
+                                "target_date": 123,
+                            },
+                        ],
+                        "total_count": 2,
+                    },
+                )
+            ]
+        )
+
+        with patch("builtins.print") as mock_print:
+            by_date = _load_paid_holidays_by_date(
+                fake_client,
+                company_id=123,
+                applicant_id=456,
+                year=2026,
+                month=3,
+            )
+
+        self.assertEqual({"2026-03-01"}, set(by_date))
+        logged_lines = [call.args[0] for call in mock_print.call_args_list]
+        self.assertIn(
+            "[INFO] paid_holidays取得結果 valid_count=1 invalid_target_date_count=1 target_dates=2026-03-01",
+            logged_lines,
+        )
 
     def test_process_date_full_paid_holiday_skips_attendance_tag(self) -> None:
         fake_client = _FakeHrApiClientForProcessDate()
