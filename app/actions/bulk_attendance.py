@@ -25,6 +25,25 @@ from app.exit_codes import EXIT_CODE_APP_ERROR, EXIT_CODE_MENU_ERROR, EXIT_CODE_
 
 _PROCESS_RESULT = Literal["success", "skipped", "error"]
 _PAID_HOLIDAY_KIND = Literal["none", "full", "half", "half_fallback"]
+_HALF_FALLBACK_REASON = Literal[
+    "multiple_half_requests",
+    "missing_half_time",
+    "invalid_half_time",
+    "invalid_half_range",
+    "outside_work_range",
+    "center_split",
+    "invalid_half_duration",
+]
+
+_HALF_FALLBACK_REASON_MESSAGES: dict[_HALF_FALLBACK_REASON, str] = {
+    "multiple_half_requests": "同じ日に半休申請が複数あるぞ",
+    "missing_half_time": "半休申請の開始時刻または終了時刻の設定がなくてよくわからん",
+    "invalid_half_time": "半休申請の開始時刻または終了時刻の形式がおかしそう",
+    "invalid_half_range": "半休申請の開始時刻が終了時刻以降になっていそう",
+    "outside_work_range": "半休申請の時間が指定された勤務時間の範囲外にありそう",
+    "center_split": "半休申請が勤務時間の中央にあって勤務時間がふたつに分かれちゃってる",
+    "invalid_half_duration": "半休なのに勤務時間が全部潰されちゃってる",
+}
 
 
 @dataclass(frozen=True)
@@ -36,7 +55,7 @@ class _PaidHolidayDecision:
     work_start_minutes: "int | None" = None
     work_end_minutes: "int | None" = None
     paid_minutes: "int | None" = None
-    fallback_reason: "str | None" = None
+    fallback_reason: "_HALF_FALLBACK_REASON | None" = None
     fallback_detail: "str | None" = None
 
 
@@ -380,13 +399,17 @@ def _process_date(
         return "error"
 
     work_label = _work_result_label(decision, work_start_minutes, work_end_minutes)
+    fallback_notice = _half_fallback_result_notice(decision)
 
     if decision.kind == "full":
         print(f"[OK]   {date} {work_label} 勤怠登録したよ (出社タグなし)")
         return "success"
 
     if not include_attendance_tag:
-        print(f"[OK]   {date} {work_label} 勤怠登録したよ (出社タグなし)")
+        print(
+            f"[OK]   {date} {work_label} 勤怠登録したよ "
+            f"(出社タグなし){fallback_notice}"
+        )
         return "success"
 
     if attendance_tag_id is None:
@@ -396,11 +419,11 @@ def _process_date(
     try:
         hr_client.put_attendance_tags(employee_id, date, tag_payload)
     except ApiResponseError as exc:
-        print(f"[OK]   {date} {work_label} 勤怠登録したよ")
+        print(f"[OK]   {date} {work_label} 勤怠登録したよ{fallback_notice}")
         _print_api_error(date, "put_attendance_tags", exc)
         return "error"
 
-    print(f"[OK]   {date} {work_label} 出社タグ付与したよ")
+    print(f"[OK]   {date} {work_label} 出社タグ付与したよ{fallback_notice}")
     return "success"
 
 
@@ -534,19 +557,6 @@ def _build_half_decision(
             reason="outside_work_range",
         )
 
-    is_center_split = (
-        start_minutes > work_start_minutes
-        and end_minutes < work_end_minutes
-        and start_minutes < end_minutes
-    )
-    if is_center_split:
-        return _half_fallback_decision(
-            request_id=request_id,
-            start_at=start_at,
-            end_at=end_at,
-            reason="center_split",
-        )
-
     if start_minutes == work_start_minutes:
         paid_minutes = end_minutes - work_start_minutes
         decision_work_start_minutes = end_minutes
@@ -560,7 +570,7 @@ def _build_half_decision(
             request_id=request_id,
             start_at=start_at,
             end_at=end_at,
-            reason="edge_not_aligned",
+            reason="center_split",
         )
 
     if decision_work_start_minutes >= decision_work_end_minutes or paid_minutes <= 0:
@@ -587,7 +597,7 @@ def _half_fallback_decision(
     request_id: "int | None",
     start_at: "str | None",
     end_at: "str | None",
-    reason: str,
+    reason: _HALF_FALLBACK_REASON,
 ) -> _PaidHolidayDecision:
     detail = (
         f"request_id={_to_log_value(request_id)},start_at={_to_log_value(start_at)},"
@@ -611,6 +621,25 @@ def _print_half_fallback(date: str, decision: _PaidHolidayDecision) -> None:
         detail_parts.append(decision.fallback_detail)
     detail = ",".join(detail_parts) if detail_parts else "detail=unknown"
     print(f"[WARN] {date} reason=half_fallback detail={detail}")
+
+
+def _half_fallback_result_notice(decision: _PaidHolidayDecision) -> str:
+    if decision.kind != "half_fallback":
+        return ""
+
+    fallback_reason = decision.fallback_reason
+    reason_message = (
+        _HALF_FALLBACK_REASON_MESSAGES.get(fallback_reason)
+        if fallback_reason is not None
+        else None
+    )
+    if reason_message is None:
+        reason_message = "半休申請を自動反映できない理由がよくわからん"
+
+    return (
+        f" 半休を自動反映できなかったよ (理由: {reason_message})。"
+        "指定された勤務時間どおりに登録したので、 freee のサイトで確認・修正してね"
+    )
 
 
 def _build_work_record_payload(

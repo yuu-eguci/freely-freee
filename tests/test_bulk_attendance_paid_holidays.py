@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from app.actions.bulk_attendance import (
+    _HALF_FALLBACK_REASON_MESSAGES,
     _build_half_decision,
     _decide_paid_holiday,
     _fetch_paid_holidays_for_month,
@@ -152,6 +153,20 @@ class BulkAttendancePaidHolidayTests(unittest.TestCase):
 
         self.assertEqual("half_fallback", decision.kind)
         self.assertEqual("center_split", decision.fallback_reason)
+
+    def test_half_fallback_reason_messages(self) -> None:
+        self.assertEqual(
+            {
+                "multiple_half_requests": "同じ日に半休申請が複数あるぞ",
+                "missing_half_time": "半休申請の開始時刻または終了時刻の設定がなくてよくわからん",
+                "invalid_half_time": "半休申請の開始時刻または終了時刻の形式がおかしそう",
+                "invalid_half_range": "半休申請の開始時刻が終了時刻以降になっていそう",
+                "outside_work_range": "半休申請の時間が指定された勤務時間の範囲外にありそう",
+                "center_split": "半休申請が勤務時間の中央にあって勤務時間がふたつに分かれちゃってる",
+                "invalid_half_duration": "半休なのに勤務時間が全部潰されちゃってる",
+            },
+            _HALF_FALLBACK_REASON_MESSAGES,
+        )
 
     def test_decide_paid_holiday_rejects_unsupported_status(self) -> None:
         decision = _decide_paid_holiday(
@@ -367,6 +382,48 @@ class BulkAttendancePaidHolidayTests(unittest.TestCase):
         self.assertEqual("success", result)
         self.assertEqual(1, len(fake_client.put_work_record_calls))
         self.assertEqual(1, len(fake_client.put_attendance_tags_calls))
+
+    def test_process_date_half_fallback_logs_japanese_reason_and_guidance(self) -> None:
+        fake_client = _FakeHrApiClientForProcessDate()
+
+        with patch("builtins.print") as mock_print:
+            result = _process_date(
+                fake_client,
+                employee_id=100,
+                company_id=200,
+                attendance_tag_id=None,
+                date="2026-07-21",
+                paid_holidays_for_date=[
+                    {
+                        "id": 18710761,
+                        "holiday_type": "half",
+                        "status": "approved",
+                        "revoke_status": None,
+                        "start_at": "14:00",
+                        "end_at": "18:00",
+                    }
+                ],
+                work_start_minutes=BULK_ATTENDANCE_WORK_START_MINUTES,
+                work_end_minutes=BULK_ATTENDANCE_WORK_END_MINUTES,
+                include_attendance_tag=False,
+            )
+
+        self.assertEqual("success", result)
+        logged_lines = [call.args[0] for call in mock_print.call_args_list]
+        self.assertIn(
+            "[WARN] 2026-07-21 reason=half_fallback "
+            "detail=reason=center_split,request_id=18710761,start_at=14:00,end_at=18:00",
+            logged_lines,
+        )
+        self.assertIn(
+            "[OK]   2026-07-21 09:00-19:00(half_fallback) 勤怠登録したよ "
+            "(出社タグなし) 半休を自動反映できなかったよ "
+            "(理由: 半休申請が勤務時間の中央にあって勤務時間がふたつに分かれちゃってる)。"
+            "指定された勤務時間どおりに登録したので、 freee のサイトで確認・修正してね",
+            logged_lines,
+        )
+        payload = fake_client.put_work_record_calls[0]["body"]
+        self.assertNotIn("paid_holidays", payload)
 
     def test_process_date_normal_day_ignores_use_default_work_pattern_false(self) -> None:
         fake_client = _FakeHrApiClientForProcessDate(
