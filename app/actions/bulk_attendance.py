@@ -152,12 +152,8 @@ def _parse_work_hours() -> "tuple[int, int] | None":
     default_start_hour = BULK_ATTENDANCE_WORK_START_MINUTES // 60
     default_end_hour = BULK_ATTENDANCE_WORK_END_MINUTES // 60
 
-    start_raw = input(
-        f"出勤何時にする? ( 0-23 の整数。Enter で {default_start_hour} ): "
-    ).strip()
-    end_raw = input(
-        f"退勤何時にする? ( 0-23 の整数。Enter で {default_end_hour} ): "
-    ).strip()
+    start_raw = input(f"出勤何時にする? ( 0-23 の整数。Enter で {default_start_hour} ): ").strip()
+    end_raw = input(f"退勤何時にする? ( 0-23 の整数。Enter で {default_end_hour} ): ").strip()
 
     start_hour = _parse_hour_input(start_raw, "出勤", default_start_hour)
     if start_hour is None:
@@ -171,10 +167,7 @@ def _parse_work_hours() -> "tuple[int, int] | None":
 
 def _validate_work_hours(start_hour: int, end_hour: int) -> "tuple[int, int] | None":
     if start_hour >= end_hour:
-        print(
-            "[エラー] 出勤時刻は退勤時刻より前にしてね "
-            f"( start={start_hour:02d}, end={end_hour:02d} )"
-        )
+        print(f"[エラー] 出勤時刻は退勤時刻より前にしてね ( start={start_hour:02d}, end={end_hour:02d} )")
         return None
     return start_hour * 60, end_hour * 60
 
@@ -204,9 +197,7 @@ def _parse_include_attendance_tag() -> "bool | None":
     return None
 
 
-def _resolve_attendance_tag_id(
-    hr_client: HrApiClient, employee_id: int, company_id: int
-) -> int:
+def _resolve_attendance_tag_id(hr_client: HrApiClient, employee_id: int, company_id: int) -> int:
     """勤怠タグ一覧から「出社」を含むタグの id を返します。"""
 
     resp = hr_client.get_attendance_tags(employee_id, company_id)
@@ -347,10 +338,7 @@ def _process_date(
     day_pattern = body.get("day_pattern") if isinstance(body, dict) else None
 
     if day_pattern != "normal_day":
-        print(
-            f"[SKIP] {date} reason=day_pattern_not_normal_day "
-            f"detail=day_pattern={_to_log_value(day_pattern)}"
-        )
+        print(f"[SKIP] {date} reason=day_pattern_not_normal_day detail=day_pattern={_to_log_value(day_pattern)}")
         return "skipped"
 
     decision = _decide_paid_holiday(
@@ -383,10 +371,7 @@ def _process_date(
         return "success"
 
     if not include_attendance_tag:
-        print(
-            f"[OK]   {date} {work_label} 勤怠登録したよ "
-            f"(出社タグなし){fallback_notice}"
-        )
+        print(f"[OK]   {date} {work_label} 勤怠登録したよ (出社タグなし){fallback_notice}")
         return "success"
 
     if attendance_tag_id is None:
@@ -474,10 +459,7 @@ def _select_full_paid_holiday(date: str, full_requests: "list[dict[str, Any]]") 
     selected = sorted(full_requests, key=_full_priority, reverse=True)[0]
     all_ids = [_to_log_value(_as_int(item.get("id"))) for item in full_requests]
     selected_id = _to_log_value(_as_int(selected.get("id")))
-    print(
-        f"[WARN] {date} reason=multiple_full_requests "
-        f"detail=request_ids={','.join(all_ids)},selected={selected_id}"
-    )
+    print(f"[WARN] {date} reason=multiple_full_requests detail=request_ids={','.join(all_ids)},selected={selected_id}")
     return selected
 
 
@@ -576,10 +558,7 @@ def _half_fallback_decision(
     end_at: "str | None",
     reason: _HALF_FALLBACK_REASON,
 ) -> _PaidHolidayDecision:
-    detail = (
-        f"request_id={_to_log_value(request_id)},start_at={_to_log_value(start_at)},"
-        f"end_at={_to_log_value(end_at)}"
-    )
+    detail = f"request_id={_to_log_value(request_id)},start_at={_to_log_value(start_at)},end_at={_to_log_value(end_at)}"
     return _PaidHolidayDecision(
         kind="half_fallback",
         request_id=request_id,
@@ -605,11 +584,7 @@ def _half_fallback_result_notice(decision: _PaidHolidayDecision) -> str:
         return ""
 
     fallback_reason = decision.fallback_reason
-    reason_message = (
-        _HALF_FALLBACK_REASON_MESSAGES.get(fallback_reason)
-        if fallback_reason is not None
-        else None
-    )
+    reason_message = _HALF_FALLBACK_REASON_MESSAGES.get(fallback_reason) if fallback_reason is not None else None
     if reason_message is None:
         reason_message = "半休申請を自動反映できない理由がよくわからん"
 
@@ -627,18 +602,12 @@ def _build_work_record_payload(
     work_end_minutes: int,
 ) -> dict[str, Any]:
     if work_start_minutes >= work_end_minutes:
-        raise ActionExecutionError(
-            "就業時刻の範囲が不正です。start は end より前である必要があります。"
-        )
+        raise ActionExecutionError("就業時刻の範囲が不正です。start は end より前である必要があります。")
 
     if decision.kind == "full":
         return _build_full_paid_holiday_payload(company_id)
     if decision.kind == "half":
-        if (
-            decision.work_start_minutes is None
-            or decision.work_end_minutes is None
-            or decision.paid_minutes is None
-        ):
+        if decision.work_start_minutes is None or decision.work_end_minutes is None or decision.paid_minutes is None:
             raise ActionExecutionError("half 有給 payload の構築に必要な値が不足しています。")
         return _build_half_paid_holiday_payload(
             company_id=company_id,
@@ -666,9 +635,7 @@ def _build_default_work_record_payload(
     if break_start_minutes is None or break_end_minutes is None:
         raise ActionExecutionError("休憩時刻の定数が不正です。")
 
-    has_break = (
-        work_start_minutes <= break_start_minutes and work_end_minutes >= break_end_minutes
-    )
+    has_break = work_start_minutes <= break_start_minutes and work_end_minutes >= break_end_minutes
     break_records: list[dict[str, str]] = []
     if has_break:
         break_records = [
@@ -837,9 +804,6 @@ def _print_summary(
 
     error_count = 1 if error_date else 0
     if error_date:
-        print(
-            f"\n中断: {success_count}日登録 / {skip_count}日スキップ / {error_count}日エラー"
-            f" ({error_date} で中断)"
-        )
+        print(f"\n中断: {success_count}日登録 / {skip_count}日スキップ / {error_count}日エラー ({error_date} で中断)")
     else:
         print(f"\n完了: {success_count}日登録 / {skip_count}日スキップ / {error_count}日エラー")

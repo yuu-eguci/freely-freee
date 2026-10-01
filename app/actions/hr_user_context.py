@@ -30,7 +30,9 @@ def resolve_current_user_context(
 
     user_id = _as_int(body.get("id"))
     if user_id is None:
-        raise ActionExecutionError("GET /users/me: user_id が取得できませんでした。freee の権限設定を確認してください。")
+        raise ActionExecutionError(
+            "GET /users/me: user_id が取得できませんでした。freee の権限設定を確認してください。"
+        )
 
     company = _resolve_target_company(body, target_company_id)
     company_id = _require_int(
