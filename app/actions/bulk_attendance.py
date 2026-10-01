@@ -18,6 +18,7 @@ from app.actions.bulk_attendance_common import (
     BULK_ATTENDANCE_WORK_START_MINUTES,
 )
 from app.actions.hr_user_context import resolve_current_user_context
+from app.actions.target_month_input import parse_target_month
 from app.clients.hr_api_client import HrApiClient
 from app.context import AppContext
 from app.errors import ActionExecutionError, ApiResponseError
@@ -66,7 +67,7 @@ def handler(context: AppContext) -> int:
 
 
 def _run_bulk_attendance(context: AppContext) -> int:
-    result = _parse_target_month()
+    result = parse_target_month()
     if result is None:
         return EXIT_CODE_MENU_ERROR
     year, month = result
@@ -145,30 +146,6 @@ def _execute_bulk_attendance(
 
     _print_summary(success_count, skip_count)
     return EXIT_CODE_OK
-
-
-def _parse_target_month() -> "tuple[int, int] | None":
-    """input() で yyyy-mm を受け取り、(year, month) を返します。不正入力時は None を返します。"""
-
-    raw = input("対象月を入力してね (yyyy-mm): ").strip()
-    return _parse_target_month_value(raw)
-
-
-def _parse_target_month_value(raw: str) -> "tuple[int, int] | None":
-    """yyyy-mm 形式の文字列を (year, month) へ変換します。"""
-
-    if not raw:
-        print("[エラー] 入力が空です。")
-        return None
-    if not re.fullmatch(r"\d{4}-\d{2}", raw):
-        print(f"[エラー] フォーマットが不正です: {raw!r}  (例: 2026-03)")
-        return None
-    try:
-        dt = datetime.strptime(raw, "%Y-%m")
-    except ValueError:
-        print(f"[エラー] 存在しない年月です: {raw!r}")
-        return None
-    return dt.year, dt.month
 
 
 def _parse_work_hours() -> "tuple[int, int] | None":
